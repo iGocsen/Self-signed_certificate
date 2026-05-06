@@ -1,25 +1,41 @@
 import forge from "node-forge";
 
+export type CertMode = "self-signed" | "ca-chain";
+
 export interface CertOptions {
+  mode: CertMode;
   commonName: string;
   organization?: string;
   country?: string;
   state?: string;
   locality?: string;
-  days: number;
+  caDays: number;
+  certDays: number;
   keySize: number;
   sans: string[];
   ipAddresses: string[];
-  algorithm: "RSA" | "EC";
+  existingCaCert?: string;
+  existingCaKey?: string;
 }
 
 export interface GeneratedCert {
-  privateKey: string;
-  certificate: string;
+  mode: CertMode;
+  caCertificate?: string;
+  caPrivateKey?: string;
+  serverCertificate: string;
+  serverPrivateKey: string;
   csr: string;
-  info: {
+  caInfo?: {
     commonName: string;
     organization: string;
+    validFrom: string;
+    validTo: string;
+    keySize: number;
+    serialNumber: string;
+    fingerprint: string;
+  };
+  serverInfo: {
+    commonName: string;
     validFrom: string;
     validTo: string;
     keySize: number;
@@ -31,32 +47,93 @@ export interface GeneratedCert {
   };
 }
 
-export function generateCertificate(options: CertOptions): GeneratedCert {
+function generateSerialNumber(): string {
+  const bytes = forge.random.getBytesSync(16);
+  const firstByte = bytes.charCodeAt(0) & 0x7f;
+  const hexBytes = [firstByte.toString(16).padStart(2, "0")];
+  for (let i = 1; i < bytes.length; i++) {
+    hexBytes.push(bytes.charCodeAt(i).toString(16).padStart(2, "0"));
+  }
+  return hexBytes.join("").toUpperCase();
+}
+
+function calculateFingerprint(cert: forge.pki.Certificate): string {
+  const derBytes = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+  const md = forge.md.sha256.create();
+  md.update(derBytes);
+  return md
+    .digest()
+    .toHex()
+    .match(/.{2}/g)!
+    .join(":")
+    .toUpperCase();
+}
+
+function buildSanEntries(commonName: string, sans: string[], ipAddresses: string[]): Array<{ type: number; value?: string; ip?: string }> {
+  const entries: Array<{ type: number; value?: string; ip?: string }> = [];
+  if (commonName) {
+    const isIp = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(commonName);
+    if (!isIp) {
+      entries.push({ type: 2, value: commonName });
+    }
+  }
+  sans.forEach((dns) => {
+    if (dns !== commonName) {
+      entries.push({ type: 2, value: dns });
+    }
+  });
+  ipAddresses.forEach((ip) => {
+    entries.push({ type: 7, ip });
+  });
+  return entries;
+}
+
+function buildServerExtensions(
+  commonName: string,
+  sans: string[],
+  ipAddresses: string[],
+  caSKI?: string
+): any[] {
+  const exts: any[] = [
+    { name: "basicConstraints", cA: false },
+    { name: "keyUsage", digitalSignature: true, keyEncipherment: true, critical: true },
+    { name: "extKeyUsage", serverAuth: true, clientAuth: true },
+    { name: "subjectKeyIdentifier" },
+  ];
+  if (caSKI) {
+    exts.push({
+      name: "authorityKeyIdentifier",
+      keyIdentifier: forge.util.hexToBytes(caSKI),
+    });
+  }
+  const sanEntries = buildSanEntries(commonName, sans, ipAddresses);
+  if (sanEntries.length > 0) {
+    exts.push({ name: "subjectAltName", altNames: sanEntries });
+  }
+  return exts;
+}
+
+function generateSelfSigned(options: CertOptions): GeneratedCert {
   const {
     commonName,
     organization = "Local Development",
-    country = "US",
-    state = "California",
-    locality = "San Francisco",
-    days = 365,
+    country = "CN",
+    state = "Beijing",
+    locality = "Beijing",
+    certDays = 365,
     keySize = 2048,
     sans = [],
     ipAddresses = [],
   } = options;
 
-  // Generate RSA key pair
-  const rsaKey = forge.pki.rsa.generateKeyPair(keySize);
-  const privateKeyPem = forge.pki.privateKeyToPem(rsaKey.privateKey);
-
-  // Create certificate
+  const keys = forge.pki.rsa.generateKeyPair(keySize);
   const cert = forge.pki.createCertificate();
-  cert.publicKey = rsaKey.publicKey;
-  cert.serialNumber = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(16).toUpperCase();
+  cert.publicKey = keys.publicKey;
+  cert.serialNumber = generateSerialNumber();
   cert.validity.notBefore = new Date();
   cert.validity.notAfter = new Date();
-  cert.validity.notAfter.setDate(cert.validity.notBefore.getDate() + days);
+  cert.validity.notAfter.setDate(cert.validity.notBefore.getDate() + certDays);
 
-  // Subject attributes
   const attrs = [
     { name: "commonName", value: commonName },
     { name: "countryName", value: country },
@@ -66,94 +143,40 @@ export function generateCertificate(options: CertOptions): GeneratedCert {
   ];
 
   cert.setSubject(attrs);
-  cert.setIssuer(attrs); // Self-signed
+  cert.setIssuer(attrs);
 
-  // Extensions
   const exts: any[] = [
-    {
-      name: "basicConstraints",
-      cA: true,
-      critical: true,
-    },
-    {
-      name: "keyUsage",
-      keyCertSign: true,
-      digitalSignature: true,
-      nonRepudiation: true,
-      keyEncipherment: true,
-      dataEncipherment: true,
-      critical: true,
-    },
-    {
-      name: "extKeyUsage",
-      serverAuth: true,
-      clientAuth: true,
-      codeSigning: true,
-      emailProtection: true,
-      timeStamping: true,
-    },
-    {
-      name: "nsCertType",
-      client: true,
-      server: true,
-      email: true,
-      objsign: true,
-      sslCA: true,
-      emailCA: true,
-      objCA: true,
-    },
+    { name: "basicConstraints", cA: true, critical: true },
+    { name: "keyUsage", digitalSignature: true, keyEncipherment: true, keyCertSign: true, cRLSign: true, critical: true },
+    { name: "extKeyUsage", serverAuth: true, clientAuth: true },
+    { name: "subjectKeyIdentifier" },
   ];
 
-  // Add SANs
-  const sanNames: Array<{ type: number; value: string }> = [];
-
-  sans.forEach((dns) => {
-    sanNames.push({ type: 2, value: dns }); // dNSName
-  });
-
-  ipAddresses.forEach((ip) => {
-    sanNames.push({ type: 7, ip });
-  });
-
-  if (sanNames.length > 0) {
-    exts.push({
-      name: "subjectAltName",
-      altNames: sanNames,
-    });
+  const sanEntries = buildSanEntries(commonName, sans, ipAddresses);
+  if (sanEntries.length > 0) {
+    exts.push({ name: "subjectAltName", altNames: sanEntries });
   }
 
   cert.setExtensions(exts);
+  cert.sign(keys.privateKey, forge.md.sha256.create());
 
-  // Self-sign
-  cert.sign(rsaKey.privateKey, forge.md.sha256.create());
+  const csr = forge.pki.createCertificationRequest();
+  csr.publicKey = keys.publicKey;
+  csr.setSubject(attrs);
+  csr.sign(keys.privateKey, forge.md.sha256.create());
 
   const certPem = forge.pki.certificateToPem(cert);
-
-  // Generate CSR
-  const csr = forge.pki.createCertificationRequest();
-  csr.publicKey = rsaKey.publicKey;
-  csr.setSubject(attrs);
-  csr.sign(rsaKey.privateKey, forge.md.sha256.create());
+  const keyPem = forge.pki.privateKeyToPem(keys.privateKey);
   const csrPem = forge.pki.certificationRequestToPem(csr);
-
-  // Calculate fingerprint
-  const derBytes = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
-  const md = forge.md.sha256.create();
-  md.update(derBytes);
-  const fingerprint = md
-    .digest()
-    .toHex()
-    .match(/.{2}/g)!
-    .join(":")
-    .toUpperCase();
+  const fingerprint = calculateFingerprint(cert);
 
   return {
-    privateKey: privateKeyPem,
-    certificate: certPem,
+    mode: "self-signed",
+    serverCertificate: certPem,
+    serverPrivateKey: keyPem,
     csr: csrPem,
-    info: {
+    serverInfo: {
       commonName,
-      organization,
       validFrom: cert.validity.notBefore.toISOString(),
       validTo: cert.validity.notAfter.toISOString(),
       keySize,
@@ -166,8 +189,212 @@ export function generateCertificate(options: CertOptions): GeneratedCert {
   };
 }
 
+function generateCaChain(options: CertOptions): GeneratedCert {
+  const {
+    commonName,
+    organization = "Local Development CA",
+    country = "CN",
+    state = "Beijing",
+    locality = "Beijing",
+    caDays = 3650,
+    certDays = 365,
+    keySize = 2048,
+    sans = [],
+    ipAddresses = [],
+  } = options;
+
+  const caKeys = forge.pki.rsa.generateKeyPair(keySize);
+  const caCert = forge.pki.createCertificate();
+  caCert.publicKey = caKeys.publicKey;
+  caCert.serialNumber = generateSerialNumber();
+  caCert.validity.notBefore = new Date();
+  caCert.validity.notAfter = new Date();
+  caCert.validity.notAfter.setDate(caCert.validity.notBefore.getDate() + caDays);
+
+  const caAttrs = [
+    { name: "commonName", value: `${organization} Root CA` },
+    { name: "countryName", value: country },
+    { name: "stateOrProvinceName", value: state },
+    { name: "localityName", value: locality },
+    { name: "organizationName", value: organization },
+    { name: "organizationalUnitName", value: "Local Development" },
+  ];
+
+  caCert.setSubject(caAttrs);
+  caCert.setIssuer(caAttrs);
+  caCert.setExtensions([
+    { name: "basicConstraints", cA: true, critical: true },
+    { name: "keyUsage", keyCertSign: true, cRLSign: true, critical: true },
+    { name: "subjectKeyIdentifier" },
+  ]);
+  caCert.sign(caKeys.privateKey, forge.md.sha256.create());
+
+  const serverKeys = forge.pki.rsa.generateKeyPair(keySize);
+  const serverCert = forge.pki.createCertificate();
+  serverCert.publicKey = serverKeys.publicKey;
+  serverCert.serialNumber = generateSerialNumber();
+  serverCert.validity.notBefore = new Date();
+  serverCert.validity.notAfter = new Date();
+  serverCert.validity.notAfter.setDate(serverCert.validity.notBefore.getDate() + certDays);
+
+  const serverAttrs = [
+    { name: "commonName", value: commonName },
+    { name: "countryName", value: country },
+    { name: "stateOrProvinceName", value: state },
+    { name: "localityName", value: locality },
+    { name: "organizationName", value: organization },
+  ];
+
+  serverCert.setSubject(serverAttrs);
+  serverCert.setIssuer(caCert.subject.attributes);
+
+  const caSKIExt = caCert.extensions.find((ext) => ext.name === "subjectKeyIdentifier");
+  const caSKI = caSKIExt && "subjectKeyIdentifier" in caSKIExt ? (caSKIExt.subjectKeyIdentifier as string) : undefined;
+
+  const serverExts = buildServerExtensions(commonName, sans, ipAddresses, caSKI);
+  serverCert.setExtensions(serverExts);
+  serverCert.sign(caKeys.privateKey, forge.md.sha256.create());
+
+  const csr = forge.pki.createCertificationRequest();
+  csr.publicKey = serverKeys.publicKey;
+  csr.setSubject(serverAttrs);
+  csr.sign(serverKeys.privateKey, forge.md.sha256.create());
+
+  const caCertPem = forge.pki.certificateToPem(caCert);
+  const caKeyPem = forge.pki.privateKeyToPem(caKeys.privateKey);
+  const serverCertPem = forge.pki.certificateToPem(serverCert);
+  const serverKeyPem = forge.pki.privateKeyToPem(serverKeys.privateKey);
+  const csrPem = forge.pki.certificationRequestToPem(csr);
+
+  return {
+    mode: "ca-chain",
+    caCertificate: caCertPem,
+    caPrivateKey: caKeyPem,
+    serverCertificate: serverCertPem,
+    serverPrivateKey: serverKeyPem,
+    csr: csrPem,
+    caInfo: {
+      commonName: `${organization} Root CA`,
+      organization,
+      validFrom: caCert.validity.notBefore.toISOString(),
+      validTo: caCert.validity.notAfter.toISOString(),
+      keySize,
+      serialNumber: caCert.serialNumber,
+      fingerprint: calculateFingerprint(caCert),
+    },
+    serverInfo: {
+      commonName,
+      validFrom: serverCert.validity.notBefore.toISOString(),
+      validTo: serverCert.validity.notAfter.toISOString(),
+      keySize,
+      algorithm: "RSA",
+      sans,
+      ipAddresses,
+      serialNumber: serverCert.serialNumber,
+      fingerprint: calculateFingerprint(serverCert),
+    },
+  };
+}
+
+function signWithExistingCa(options: CertOptions): GeneratedCert {
+  const {
+    commonName,
+    organization = "Local Development",
+    country = "CN",
+    state = "Beijing",
+    locality = "Beijing",
+    certDays = 365,
+    keySize = 2048,
+    sans = [],
+    ipAddresses = [],
+    existingCaCert,
+    existingCaKey,
+  } = options;
+
+  if (!existingCaCert || !existingCaKey) {
+    throw new Error("Existing CA certificate and key are required");
+  }
+
+  const caCert = forge.pki.certificateFromPem(existingCaCert);
+  const caKey = forge.pki.privateKeyFromPem(existingCaKey);
+
+  const serverKeys = forge.pki.rsa.generateKeyPair(keySize);
+  const serverCert = forge.pki.createCertificate();
+  serverCert.publicKey = serverKeys.publicKey;
+  serverCert.serialNumber = generateSerialNumber();
+  serverCert.validity.notBefore = new Date();
+  serverCert.validity.notAfter = new Date();
+  serverCert.validity.notAfter.setDate(serverCert.validity.notBefore.getDate() + certDays);
+
+  const serverAttrs = [
+    { name: "commonName", value: commonName },
+    { name: "countryName", value: country },
+    { name: "stateOrProvinceName", value: state },
+    { name: "localityName", value: locality },
+    { name: "organizationName", value: organization },
+  ];
+
+  serverCert.setSubject(serverAttrs);
+  serverCert.setIssuer(caCert.subject.attributes);
+
+  const caSKIExt = caCert.extensions.find((ext) => ext.name === "subjectKeyIdentifier");
+  const caSKI = caSKIExt && "subjectKeyIdentifier" in caSKIExt ? (caSKIExt.subjectKeyIdentifier as string) : undefined;
+
+  const serverExts = buildServerExtensions(commonName, sans, ipAddresses, caSKI);
+  serverCert.setExtensions(serverExts);
+  serverCert.sign(caKey, forge.md.sha256.create());
+
+  const csr = forge.pki.createCertificationRequest();
+  csr.publicKey = serverKeys.publicKey;
+  csr.setSubject(serverAttrs);
+  csr.sign(serverKeys.privateKey, forge.md.sha256.create());
+
+  const caCertPem = forge.pki.certificateToPem(caCert);
+  const serverCertPem = forge.pki.certificateToPem(serverCert);
+  const serverKeyPem = forge.pki.privateKeyToPem(serverKeys.privateKey);
+  const csrPem = forge.pki.certificationRequestToPem(csr);
+
+  return {
+    mode: "ca-chain",
+    caCertificate: caCertPem,
+    serverCertificate: serverCertPem,
+    serverPrivateKey: serverKeyPem,
+    csr: csrPem,
+    caInfo: {
+      commonName: (caCert.subject.getField("CN")?.value as string) || "Unknown CA",
+      organization: (caCert.subject.getField("O")?.value as string) || "",
+      validFrom: caCert.validity.notBefore.toISOString(),
+      validTo: caCert.validity.notAfter.toISOString(),
+      keySize: caKey.n ? (caKey.n.bitLength() ?? 0) : 0,
+      serialNumber: caCert.serialNumber,
+      fingerprint: calculateFingerprint(caCert),
+    },
+    serverInfo: {
+      commonName,
+      validFrom: serverCert.validity.notBefore.toISOString(),
+      validTo: serverCert.validity.notAfter.toISOString(),
+      keySize,
+      algorithm: "RSA",
+      sans,
+      ipAddresses,
+      serialNumber: serverCert.serialNumber,
+      fingerprint: calculateFingerprint(serverCert),
+    },
+  };
+}
+
+export function generateCertificate(options: CertOptions): GeneratedCert {
+  if (options.mode === "self-signed") {
+    return generateSelfSigned(options);
+  }
+  if (options.existingCaCert && options.existingCaKey) {
+    return signWithExistingCa(options);
+  }
+  return generateCaChain(options);
+}
+
 export function downloadFile(content: string, filename: string) {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const blob = new Blob([content], { type: "application/x-x509-ca-cert;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -178,9 +405,16 @@ export function downloadFile(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadZip(certificate: GeneratedCert) {
-  // Simple approach: download files individually
-  downloadFile(certificate.privateKey, `${certificate.info.commonName}.key`);
-  setTimeout(() => downloadFile(certificate.certificate, `${certificate.info.commonName}.crt`), 200);
-  setTimeout(() => downloadFile(certificate.csr, `${certificate.info.commonName}.csr`), 400);
+export function downloadAllFiles(cert: GeneratedCert) {
+  const files: { content: string; name: string }[] = [];
+  if (cert.mode === "ca-chain" && cert.caCertificate && cert.caPrivateKey) {
+    files.push({ content: cert.caCertificate, name: "root-ca.crt" });
+    files.push({ content: cert.caPrivateKey, name: "root-ca.key" });
+  }
+  files.push({ content: cert.serverCertificate, name: "server.crt" });
+  files.push({ content: cert.serverPrivateKey, name: "server.key" });
+  files.push({ content: cert.csr, name: "server.csr" });
+  files.forEach((file, index) => {
+    setTimeout(() => downloadFile(file.content, file.name), index * 300);
+  });
 }
