@@ -1,4 +1,5 @@
-import forge from "node-forge";
+// node-forge is loaded via CDN in index.html as window.forge
+declare const forge: typeof import("node-forge");
 
 export type CertMode = "self-signed" | "ca-chain";
 
