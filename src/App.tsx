@@ -39,6 +39,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { generateCertificate, downloadFile, downloadAllFiles, validateCaCertAndKey, type GeneratedCert, type CertOptions, type CertMode } from "@/lib/cert-generator";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -180,7 +188,7 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             <Layers className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-semibold">信任链</span>
           </div>
-          <div className="flex items-center gap-2 text-sm overflow-x-auto pb-1">
+          <div className="flex items-center justify-between gap-1 text-sm">
             <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2 flex-shrink-0">
               <Shield className="w-5 h-5 text-emerald-400 mb-1" />
               <span className="font-semibold text-emerald-400 whitespace-nowrap">Root CA</span>
@@ -370,7 +378,7 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
         </div>
         {/* PEM content - full width, vertical scroll only */}
         <div className="relative">
-          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-y-auto max-h-64 bg-black/20 whitespace-pre-wrap break-all">
+          <pre className="w-full p-4 text-xs font-mono text-muted-foreground overflow-y-auto max-h-64 bg-black/20 whitespace-pre-wrap break-all">
             {contentMap[activeTab]}
           </pre>
         </div>
@@ -414,6 +422,8 @@ export default function App() {
   const [existingCaKey, setExistingCaKey] = useState("");
   const [caCommonName, setCaCommonName] = useState("");
   const [caOu, setCaOu] = useState("");
+  const [showValidationDialog, setShowValidationDialog] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const terminalRef = useRef<HTMLDivElement>(null);
 
   const parseList = (input: string): string[] =>
@@ -423,19 +433,21 @@ export default function App() {
       .filter(Boolean);
 
   const handleGenerate = useCallback(() => {
-    // Validate required fields
+    // Collect all validation errors
+    const errors: string[] = [];
+
+    // Validate CN
     if (!commonName.trim()) {
-      toast.error("请填写通用名称 (Common Name)");
-      return;
+      errors.push("通用名称 (Common Name) 不能为空");
     }
 
     // Validate SAN input format
     if (sansInput.trim()) {
       const sans = parseList(sansInput);
       for (const san of sans) {
-        if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(san)) {
-          toast.error(`其他域名 (SAN) 格式无效：${san}`);
-          return;
+        if (!/^[a-zA-Z0-9_\-.*]+$/.test(san)) {
+          errors.push(`其他域名 (SAN) 格式无效：${san}`);
+          break;
         }
       }
     }
@@ -444,46 +456,56 @@ export default function App() {
     if (ipInput.trim()) {
       const ips = parseList(ipInput);
       for (const ip of ips) {
-        // IPv4
-        if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-          // IPv6
-          if (!/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(ip) &&
-              !/^([0-9a-fA-F]{1,4}:){1,7}:$/.test(ip) &&
-              !/^::1$/.test(ip) &&
-              !/^::$/.test(ip)) {
-            toast.error(`IP 地址格式无效：${ip}`);
-            return;
+        const isIPv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip);
+        const isIPv6 = /^[0-9a-fA-F:]+$/.test(ip) && ip.includes(':');
+        if (!isIPv4 && !isIPv6) {
+          errors.push(`IP 地址格式无效：${ip}`);
+          break;
+        }
+      }
+    }
+
+    // Validate CA cert and key pairing
+    if (certMode === "ca-chain") {
+      const hasCaCert = existingCaCert.trim();
+      const hasCaKey = existingCaKey.trim();
+
+      if (hasCaCert && !hasCaKey) {
+        errors.push("提供了 Root CA 证书但未提供 Root CA 私钥，请补充填写");
+      }
+      if (hasCaKey && !hasCaCert) {
+        errors.push("提供了 Root CA 私钥但未提供 Root CA 证书，请补充填写");
+      }
+      if (hasCaCert && hasCaKey) {
+        if (!existingCaCert.trim().includes("-----BEGIN CERTIFICATE-----")) {
+          errors.push("Root CA 证书 (PEM) 格式无效：缺少 BEGIN CERTIFICATE 标记");
+        }
+        if (!existingCaKey.trim().includes("-----BEGIN") || !existingCaKey.trim().includes("PRIVATE KEY-----")) {
+          errors.push("Root CA 私钥 (PEM) 格式无效：缺少 PRIVATE KEY 标记");
+        }
+        if (existingCaCert.trim().includes("-----BEGIN CERTIFICATE-----") &&
+            existingCaKey.trim().includes("-----BEGIN") && existingCaKey.trim().includes("PRIVATE KEY-----")) {
+          const validation = validateCaCertAndKey(existingCaCert.trim(), existingCaKey.trim());
+          if (!validation.valid) {
+            errors.push(`Root CA 证书与私钥不匹配：${validation.error}`);
           }
         }
       }
     }
 
-    // Validate existing CA cert format
-    if (certMode === "ca-chain" && existingCaCert.trim() && !existingCaKey.trim()) {
-      toast.error("提供了 CA 证书但未提供 CA 私钥");
-      return;
+    // Validate email format if provided
+    if (email.trim()) {
+      const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRegex.test(email.trim())) {
+        errors.push(`邮箱格式无效：${email.trim()}`);
+      }
     }
 
-    if (certMode === "ca-chain" && existingCaKey.trim() && !existingCaCert.trim()) {
-      toast.error("提供了 CA 私钥但未提供 CA 证书");
+    // If any errors, show dialog
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setShowValidationDialog(true);
       return;
-    }
-
-    // Validate existing CA cert and key pairing if both provided
-    if (certMode === "ca-chain" && existingCaCert.trim() && existingCaKey.trim()) {
-      if (!existingCaCert.trim().includes("-----BEGIN CERTIFICATE-----")) {
-        toast.error("Root CA 证书 (PEM) 格式无效：缺少 BEGIN CERTIFICATE 标记");
-        return;
-      }
-      if (!existingCaKey.trim().includes("-----BEGIN") || !existingCaKey.trim().includes("PRIVATE KEY-----")) {
-        toast.error("Root CA 私钥 (PEM) 格式无效：缺少 PRIVATE KEY 标记");
-        return;
-      }
-      const validation = validateCaCertAndKey(existingCaCert.trim(), existingCaKey.trim());
-      if (!validation.valid) {
-        toast.error(`CA 验证失败：${validation.error}`);
-        return;
-      }
     }
 
     setIsGenerating(true);
@@ -568,8 +590,8 @@ export default function App() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-4 gap-8">
-            <div className="lg:col-span-2 space-y-6">
+          <div className="grid lg:grid-cols-12 gap-8">
+            <div className="lg:col-span-9 space-y-6">
               {/* Cert Mode Selection */}
               <div className="bg-card border border-border/50 rounded-xl p-1 flex gap-1">
                 {[
@@ -940,7 +962,7 @@ export default function App() {
             </div>
 
             {/* Right Panel - Result */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-3 min-w-0">
               <div className="sticky top-24 space-y-4">
                 {!generatedCert && !isGenerating && (
                   <div className="bg-card/30 border border-border/30 rounded-xl p-8 text-center">
@@ -1169,6 +1191,37 @@ https.createServer({
           </div>
         </footer>
       </div>
+
+      {/* Validation Error Dialog */}
+      <Dialog open={showValidationDialog} onOpenChange={setShowValidationDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <AlertTriangle className="w-5 h-5" />
+              输入校验失败
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              请修正以下 {validationErrors.length} 个错误后重新生成：
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 space-y-2 max-h-64 overflow-y-auto">
+            {validationErrors.map((err, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <span className="text-red-400 mt-0.5 flex-shrink-0">•</span>
+                <span className="text-foreground">{err}</span>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              className="bg-emerald-500 hover:bg-emerald-600 text-black font-semibold"
+              onClick={() => setShowValidationDialog(false)}
+            >
+              我知道了
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </TooltipProvider>
   );
 }

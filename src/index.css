@@ -183,7 +183,7 @@
   min-width: 0;
 }
 .pem-area pre {
-  white-space: pre-wrap;
+  white-space: pre-wrap !important;
   word-break: break-all;
   overflow-x: hidden;
 }
