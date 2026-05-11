@@ -17,6 +17,7 @@ import {
   Server,
   Layers,
   ArrowDown,
+  ArrowRight,
   FileKey,
   Mail,
 } from "lucide-react";
@@ -120,6 +121,63 @@ function TerminalOutput({ lines, isActive }: { lines: TerminalLine[]; isActive: 
   );
 }
 
+interface TrustGuideItem {
+  icon: React.ElementType;
+  title: string;
+  steps: string[];
+  command: string;
+}
+
+function TrustGuideCard({ item }: { item: TrustGuideItem }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(item.command);
+      setCopied(true);
+      toast.success("已复制命令");
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("复制失败");
+    }
+  };
+
+  return (
+    <div className="bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+          <item.icon className="w-4 h-4 text-emerald-400" />
+        </div>
+        <h4 className="font-semibold">{item.title}</h4>
+      </div>
+      <ol className="text-sm space-y-1.5 text-muted-foreground">
+        {item.steps.map((step, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className="text-emerald-400 font-mono text-xs mt-0.5">{i + 1}.</span>
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="relative mt-3">
+        <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 pr-10 overflow-x-auto whitespace-pre">
+          {item.command}
+        </pre>
+        <button
+          onClick={handleCopy}
+          className="absolute top-2 right-2 p-1.5 rounded-md bg-black/40 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          title="复制命令"
+        >
+          {copied ? (
+            <Check className="w-3.5 h-3.5 text-emerald-400" />
+          ) : (
+            <Copy className="w-3.5 h-3.5" />
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExistingCa: boolean }) {
   const [activeTab, setActiveTab] = useState<PemTabType>("server-cert");
   const [copiedTab, setCopiedTab] = useState<PemTabType | null>(null);
@@ -188,26 +246,26 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             <Layers className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-semibold">信任链</span>
           </div>
-          <div className="flex items-center justify-between gap-1 text-sm">
-            <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2 flex-shrink-0">
+          <div className="flex flex-wrap items-center justify-center gap-1 text-sm w-full">
+            <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2 flex-shrink-0">
               <Shield className="w-5 h-5 text-emerald-400 mb-1" />
               <span className="font-semibold text-emerald-400 whitespace-nowrap">Root CA</span>
               <span className="text-xs text-muted-foreground whitespace-nowrap">自签名</span>
             </div>
             <div className="flex flex-col items-center text-muted-foreground flex-shrink-0">
-              <ArrowDown className="w-5 h-5" />
+              <ArrowRight className="w-5 h-5" />
               <span className="text-xs whitespace-nowrap">签发</span>
             </div>
-            <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-2 flex-shrink-0">
+            <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2 flex-shrink-0">
               <Server className="w-5 h-5 text-blue-400 mb-1" />
               <span className="font-semibold text-blue-400 whitespace-nowrap">Server Cert</span>
               <span className="text-xs text-muted-foreground whitespace-nowrap">{cert.serverInfo.commonName}</span>
             </div>
             <div className="flex flex-col items-center text-muted-foreground flex-shrink-0">
-              <ArrowDown className="w-5 h-5" />
+              <ArrowRight className="w-5 h-5" />
               <span className="text-xs whitespace-nowrap">安装到</span>
             </div>
-            <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2 flex-shrink-0">
+            <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 flex-shrink-0">
               <Lock className="w-5 h-5 text-amber-400 mb-1" />
               <span className="font-semibold text-amber-400 whitespace-nowrap">信任存储</span>
               <span className="text-xs text-muted-foreground whitespace-nowrap">受信任根CA</span>
@@ -337,7 +395,7 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap flex-shrink-0",
+                  "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap flex-shrink-0 cursor-pointer",
                   activeTab === tab
                     ? "text-emerald-400 bg-emerald-400/5"
                     : "text-muted-foreground hover:text-foreground"
@@ -355,7 +413,7 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={() => handleCopy(activeTab)}
             >
               {copiedTab === activeTab ? (
@@ -368,7 +426,7 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={() => downloadFile(contentMap[activeTab], labelMap[activeTab])}
             >
               <Download className="w-3.5 h-3.5" />
@@ -386,7 +444,7 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
 
       <div className="flex gap-3">
         <Button
-          className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-semibold"
+          className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-semibold cursor-pointer"
           onClick={() => {
             downloadAllFiles(cert, usedExistingCa);
             toast.success("所有文件已开始下载");
@@ -591,7 +649,7 @@ export default function App() {
           </div>
 
           <div className="grid lg:grid-cols-12 gap-8">
-            <div className="lg:col-span-9 space-y-6">
+            <div className="lg:col-span-7 space-y-6">
               {/* Cert Mode Selection */}
               <div className="bg-card border border-border/50 rounded-xl p-1 flex gap-1">
                 {[
@@ -602,7 +660,7 @@ export default function App() {
                     key={id}
                     onClick={() => setCertMode(id)}
                     className={cn(
-                      "flex-1 flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-lg text-sm transition-all",
+                      "flex-1 flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-lg text-sm transition-all cursor-pointer",
                       certMode === id
                         ? "bg-emerald-500/10 text-emerald-400 shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
@@ -626,7 +684,7 @@ export default function App() {
                     key={id}
                     onClick={() => setActiveTab(id)}
                     className={cn(
-                      "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
+                      "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer",
                       activeTab === id
                         ? "bg-emerald-500/10 text-emerald-400 shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
@@ -650,7 +708,7 @@ export default function App() {
                         setSansInput(preset.domains);
                         setIpInput(preset.ips);
                       }}
-                      className="px-3 py-1.5 text-xs rounded-md bg-secondary/50 border border-border/50 text-muted-foreground hover:text-foreground hover:border-emerald-500/30 transition-colors"
+                      className="px-3 py-1.5 text-xs rounded-md bg-secondary/50 border border-border/50 text-muted-foreground hover:text-foreground hover:border-emerald-500/30 transition-colors cursor-pointer"
                     >
                       {preset.label}
                     </button>
@@ -712,7 +770,7 @@ export default function App() {
                     </div>
                     <Textarea
                       id="sans"
-                      placeholder="*.dev.local, app.example.local"
+                      placeholder="*.dev.local,app.example.local"
                       value={sansInput}
                       onChange={(e) => setSansInput(e.target.value)}
                       className="bg-background/50 font-mono min-h-[80px] resize-none"
@@ -737,7 +795,7 @@ export default function App() {
                     </div>
                     <Textarea
                       id="ips"
-                      placeholder="127.0.0.1, 192.168.1.100, 10.0.0.1"
+                      placeholder="127.0.0.1,192.168.1.100,10.0.0.1"
                       value={ipInput}
                       onChange={(e) => setIpInput(e.target.value)}
                       className="bg-background/50 font-mono min-h-[80px] resize-none"
@@ -786,7 +844,7 @@ export default function App() {
                 <div>
                   <button
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                   >
                     <ChevronDown
                       className={cn(
@@ -939,7 +997,7 @@ export default function App() {
                 <Button
                   onClick={handleGenerate}
                   disabled={isGenerating || !commonName.trim()}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-semibold h-12 text-base"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-semibold h-12 text-base cursor-pointer"
                 >
                   {isGenerating ? (
                     <>
@@ -962,7 +1020,7 @@ export default function App() {
             </div>
 
             {/* Right Panel - Result */}
-            <div className="lg:col-span-3 min-w-0">
+            <div className="lg:col-span-5 min-w-0">
               <div className="sticky top-24 space-y-4">
                 {!generatedCert && !isGenerating && (
                   <div className="bg-card/30 border border-border/30 rounded-xl p-8 text-center">
@@ -1041,7 +1099,7 @@ export default function App() {
             <p className="text-muted-foreground text-center mb-8 max-w-xl mx-auto">
               将证书安装到系统的受信任根证书存储区后，浏览器会自动信任。
             </p>
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {[
                 {
                   icon: Shield,
@@ -1069,10 +1127,7 @@ certutil -addstore Root server.crt`,
                     "关闭并输入密码确认",
                   ],
                   command: `# 或使用命令行
-sudo security add-trusted-cert \\
-  -d -r trustRoot \\
-  -k /Library/Keychains/System.keychain \\
-  server.crt`,
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain server.crt`,
                 },
                 {
                   icon: Terminal,
@@ -1086,29 +1141,49 @@ sudo security add-trusted-cert \\
 sudo update-ca-certificates`,
                 },
               ].map((item) => (
-                <div
-                  key={item.title}
-                  className="bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                      <item.icon className="w-4 h-4 text-emerald-400" />
-                    </div>
-                    <h4 className="font-semibold">{item.title}</h4>
-                  </div>
-                  <ol className="text-sm space-y-1.5 text-muted-foreground">
-                    {item.steps.map((step, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="text-emerald-400 font-mono text-xs mt-0.5">{i + 1}.</span>
-                        <span>{step}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 overflow-x-auto mt-3">
-                    {item.command}
-                  </pre>
-                </div>
+                <TrustGuideCard key={item.title} item={item} />
               ))}
+            </div>
+
+            {/* PFX Tutorial - Separate Full Width Row */}
+            <div className="mt-6 bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                  <FileKey className="w-4 h-4 text-emerald-400" />
+                </div>
+                <h4 className="font-semibold">生成 PFX 证书</h4>
+              </div>
+              <ol className="text-sm space-y-1.5 text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">1.</span>
+                  <span>PFX/PKCS#12 格式将证书和私钥打包为一个文件</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">2.</span>
+                  <span>Windows IIS、Azure、某些 Java 应用需要此格式</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">3.</span>
+                  <span>使用 OpenSSL 将 .crt 和 .key 合并为 .pfx</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">4.</span>
+                  <span>设置导出密码保护私钥</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">5.</span>
+                  <span>将 .pfx 导入到目标系统的证书存储</span>
+                </li>
+              </ol>
+              <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 overflow-x-auto mt-3 whitespace-pre">
+{`# 使用 OpenSSL 生成 PFX
+openssl pkcs12 -export \\
+  -out server.pfx -inkey server.key -in server.crt -passout pass:your_password
+
+# 或交互式（推荐）
+openssl pkcs12 -export \\
+  -out server.pfx -inkey server.key -in server.crt`}
+              </pre>
             </div>
           </section>
 
