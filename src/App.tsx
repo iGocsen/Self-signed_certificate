@@ -39,7 +39,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { generateCertificate, downloadFile, downloadAllFiles, type GeneratedCert, type CertOptions, type CertMode } from "@/lib/cert-generator";
+import { generateCertificate, downloadFile, downloadAllFiles, validateCaCertAndKey, type GeneratedCert, type CertOptions, type CertMode } from "@/lib/cert-generator";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -156,8 +156,16 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-function CertPreview({ cert }: { cert: GeneratedCert }) {
+function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExistingCa: boolean }) {
   const [activeTab, setActiveTab] = useState<PemTabType>("server-cert");
+
+  const isCaChain = cert.mode === "ca-chain" && cert.caCertificate;
+
+  // Determine which tabs to show
+  const tabsToShow: PemTabType[] = ["server-cert", "server-key", "csr"];
+  if (isCaChain && !usedExistingCa) {
+    tabsToShow.unshift("ca-cert", "ca-key");
+  }
 
   const contentMap: Record<PemTabType, string> = {
     "ca-cert": cert.caCertificate || "",
@@ -175,7 +183,12 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
     "csr": "server.csr",
   };
 
-  const isCaChain = cert.mode === "ca-chain" && cert.caCertificate;
+  // Ensure active tab is in the visible tabs
+  useEffect(() => {
+    if (!tabsToShow.includes(activeTab)) {
+      setActiveTab("server-cert");
+    }
+  }, [tabsToShow, activeTab]);
 
   return (
     <div className="space-y-4 animate-slide-up">
@@ -228,7 +241,7 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
         </div>
       )}
 
-      {isCaChain && cert.caInfo && (
+      {isCaChain && cert.caInfo && !usedExistingCa && (
         <div className="bg-card/50 border border-emerald-500/20 rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
             <Shield className="w-4 h-4 text-emerald-400" />
@@ -284,6 +297,14 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
           </div>
         </div>
 
+        {/* SHA-256 Fingerprint - always shown */}
+        <div className="mb-3">
+          <span className="text-muted-foreground text-xs">SHA-256 指纹</span>
+          <p className="font-mono text-xs mt-0.5 break-all text-muted-foreground/70">
+            {cert.serverInfo.fingerprint}
+          </p>
+        </div>
+
         {(cert.serverInfo.sans.length > 0 || cert.serverInfo.ipAddresses.length > 0) && (
           <>
             <div className="flex items-center gap-2 mb-2">
@@ -318,28 +339,23 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
 
       <div className="border border-border/50 rounded-lg overflow-hidden">
         <div className="flex items-center bg-secondary/50 border-b border-border/50 overflow-x-auto">
-          {(["ca-cert", "ca-key", "server-cert", "server-key", "csr"] as const).map((tab) => {
-            if (tab === "ca-cert" || tab === "ca-key") {
-              if (!isCaChain) return null;
-            }
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap",
-                  activeTab === tab
-                    ? "text-emerald-400 bg-emerald-400/5"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {labelMap[tab]}
-                {activeTab === tab && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
-                )}
-              </button>
-            );
-          })}
+          {tabsToShow.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap",
+                activeTab === tab
+                  ? "text-emerald-400 bg-emerald-400/5"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {labelMap[tab]}
+              {activeTab === tab && (
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+              )}
+            </button>
+          ))}
           <div className="ml-auto flex items-center gap-1 pr-2 flex-shrink-0">
             <CopyButton text={contentMap[activeTab]} label="复制" />
             <Button
@@ -364,7 +380,7 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
         <Button
           className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-semibold"
           onClick={() => {
-            downloadAllFiles(cert);
+            downloadAllFiles(cert, usedExistingCa);
             toast.success("所有文件已开始下载");
           }}
         >
@@ -391,6 +407,7 @@ export default function App() {
   const [ipInput, setIpInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCert, setGeneratedCert] = useState<GeneratedCert | null>(null);
+  const [usedExistingCa, setUsedExistingCa] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [existingCaCert, setExistingCaCert] = useState("");
   const [existingCaKey, setExistingCaKey] = useState("");
@@ -413,8 +430,18 @@ export default function App() {
       return;
     }
 
+    // Validate existing CA cert and key if provided
+    if (certMode === "ca-chain" && existingCaCert.trim() && existingCaKey.trim()) {
+      const validation = validateCaCertAndKey(existingCaCert.trim(), existingCaKey.trim());
+      if (!validation.valid) {
+        toast.error(`CA 验证失败：${validation.error}`);
+        return;
+      }
+    }
+
     setIsGenerating(true);
     setGeneratedCert(null);
+    setUsedExistingCa(false);
 
     setTimeout(() => {
       const options: CertOptions = {
@@ -436,6 +463,7 @@ export default function App() {
       try {
         const cert = generateCertificate(options);
         setGeneratedCert(cert);
+        setUsedExistingCa(!!(existingCaCert.trim() && existingCaKey.trim()));
         toast.success("证书生成成功！");
       } catch (e: any) {
         toast.error(e.message || "证书生成失败，请检查输入");
@@ -876,7 +904,7 @@ export default function App() {
                       <Check className="w-5 h-5 text-emerald-400" />
                       <h3 className="text-lg font-semibold">证书已生成</h3>
                     </div>
-                    <CertPreview cert={generatedCert} />
+                    <CertPreview cert={generatedCert} usedExistingCa={usedExistingCa} />
                   </>
                 )}
               </div>

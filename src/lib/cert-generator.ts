@@ -406,9 +406,9 @@ export function downloadFile(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadAllFiles(cert: GeneratedCert) {
+export function downloadAllFiles(cert: GeneratedCert, usedExistingCa?: boolean) {
   const files: { content: string; name: string }[] = [];
-  if (cert.mode === "ca-chain" && cert.caCertificate && cert.caPrivateKey) {
+  if (cert.mode === "ca-chain" && cert.caCertificate && cert.caPrivateKey && !usedExistingCa) {
     files.push({ content: cert.caCertificate, name: "root-ca.crt" });
     files.push({ content: cert.caPrivateKey, name: "root-ca.key" });
   }
@@ -418,4 +418,23 @@ export function downloadAllFiles(cert: GeneratedCert) {
   files.forEach((file, index) => {
     setTimeout(() => downloadFile(file.content, file.name), index * 300);
   });
+}
+
+export function validateCaCertAndKey(caCertPem: string, caKeyPem: string): { valid: boolean; error?: string } {
+  try {
+    const caCert = forge.pki.certificateFromPem(caCertPem);
+    const caKey = forge.pki.privateKeyFromPem(caKeyPem);
+
+    const keyPubKey = forge.pki.setRsaPublicKey(caKey.n, caKey.e);
+    const certPubKey = caCert.publicKey as forge.pki.rsa.PublicKey;
+
+    if (certPubKey.n.toString() !== keyPubKey.n.toString() ||
+        certPubKey.e.toString() !== keyPubKey.e.toString()) {
+      return { valid: false, error: "CA 证书与私钥不匹配" };
+    }
+
+    return { valid: true };
+  } catch (e: any) {
+    return { valid: false, error: e.message || "CA 证书或私钥格式无效" };
+  }
 }
