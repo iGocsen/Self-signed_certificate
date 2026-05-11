@@ -8,7 +8,6 @@ import {
   Terminal,
   Globe,
   Network,
-  Clock,
   Info,
   Lock,
   FileText,
@@ -19,6 +18,7 @@ import {
   Layers,
   ArrowDown,
   FileKey,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -112,52 +112,9 @@ function TerminalOutput({ lines, isActive }: { lines: TerminalLine[]; isActive: 
   );
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        textarea.style.top = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setCopied(true);
-      toast.success("已复制到剪贴板");
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("复制失败，请手动选择文本复制");
-    }
-  };
-
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-      onClick={handleCopy}
-    >
-      {copied ? (
-        <Check className="w-3.5 h-3.5 text-emerald-400" />
-      ) : (
-        <Copy className="w-3.5 h-3.5" />
-      )}
-      {label}
-    </Button>
-  );
-}
-
 function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExistingCa: boolean }) {
   const [activeTab, setActiveTab] = useState<PemTabType>("server-cert");
+  const [copiedTab, setCopiedTab] = useState<PemTabType | null>(null);
 
   const isCaChain = cert.mode === "ca-chain" && cert.caCertificate;
 
@@ -189,6 +146,31 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
       setActiveTab("server-cert");
     }
   }, [tabsToShow, activeTab]);
+
+  const handleCopy = async (tab: PemTabType) => {
+    try {
+      const text = contentMap[tab];
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopiedTab(tab);
+      toast.success("已复制到剪贴板");
+      setTimeout(() => setCopiedTab(null), 2000);
+    } catch {
+      toast.error("复制失败，请手动选择文本复制");
+    }
+  };
 
   return (
     <div className="space-y-4 animate-slide-up">
@@ -337,27 +319,44 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
         )}
       </div>
 
-      <div className="border border-border/50 rounded-lg overflow-hidden">
-        <div className="flex items-center bg-secondary/50 border-b border-border/50 overflow-x-auto">
-          {tabsToShow.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap",
-                activeTab === tab
-                  ? "text-emerald-400 bg-emerald-400/5"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
+      {/* PEM Area - Fixed width, fixed action buttons */}
+      <div className="border border-border/50 rounded-lg overflow-hidden pem-area">
+        {/* Tab bar with fixed action buttons on the right */}
+        <div className="flex items-center justify-between bg-secondary/50 border-b border-border/50">
+          <div className="flex items-center overflow-x-auto flex-1 min-w-0">
+            {tabsToShow.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap flex-shrink-0",
+                  activeTab === tab
+                    ? "text-emerald-400 bg-emerald-400/5"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {labelMap[tab]}
+                {activeTab === tab && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+                )}
+              </button>
+            ))}
+          </div>
+          {/* Fixed action buttons - always visible, never scroll */}
+          <div className="flex items-center gap-1 pr-2 flex-shrink-0 ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => handleCopy(activeTab)}
             >
-              {labelMap[tab]}
-              {activeTab === tab && (
-                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+              {copiedTab === activeTab ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
               )}
-            </button>
-          ))}
-          <div className="ml-auto flex items-center gap-1 pr-2 flex-shrink-0">
-            <CopyButton text={contentMap[activeTab]} label="复制" />
+              复制
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -369,8 +368,9 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             </Button>
           </div>
         </div>
+        {/* PEM content - full width, no horizontal scroll needed for typical PEM */}
         <div className="relative">
-          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-x-auto max-h-64 overflow-y-auto bg-black/20">
+          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-auto max-h-64 bg-black/20 whitespace-pre-wrap break-all">
             {contentMap[activeTab]}
           </pre>
         </div>
@@ -400,6 +400,7 @@ export default function App() {
   const [country, setCountry] = useState("CN");
   const [state, setState] = useState("Beijing");
   const [locality, setLocality] = useState("Beijing");
+  const [email, setEmail] = useState("");
   const [caDays, setCaDays] = useState("3650");
   const [certDays, setCertDays] = useState("365");
   const [keySize, setKeySize] = useState("2048");
@@ -411,6 +412,8 @@ export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [existingCaCert, setExistingCaCert] = useState("");
   const [existingCaKey, setExistingCaKey] = useState("");
+  const [caCommonName, setCaCommonName] = useState("");
+  const [caOu, setCaOu] = useState("");
   const terminalRef = useRef<HTMLDivElement>(null);
 
   const parseList = (input: string): string[] =>
@@ -420,18 +423,62 @@ export default function App() {
       .filter(Boolean);
 
   const handleGenerate = useCallback(() => {
+    // Validate required fields
     if (!commonName.trim()) {
       toast.error("请填写通用名称 (Common Name)");
       return;
     }
 
-    if (certMode === "ca-chain" && existingCaCert && !existingCaKey) {
+    // Validate SAN input format
+    if (sansInput.trim()) {
+      const sans = parseList(sansInput);
+      for (const san of sans) {
+        if (!/^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/.test(san)) {
+          toast.error(`其他域名 (SAN) 格式无效：${san}`);
+          return;
+        }
+      }
+    }
+
+    // Validate IP input format
+    if (ipInput.trim()) {
+      const ips = parseList(ipInput);
+      for (const ip of ips) {
+        // IPv4
+        if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+          // IPv6
+          if (!/^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/.test(ip) &&
+              !/^([0-9a-fA-F]{1,4}:){1,7}:$/.test(ip) &&
+              !/^::1$/.test(ip) &&
+              !/^::$/.test(ip)) {
+            toast.error(`IP 地址格式无效：${ip}`);
+            return;
+          }
+        }
+      }
+    }
+
+    // Validate existing CA cert format
+    if (certMode === "ca-chain" && existingCaCert.trim() && !existingCaKey.trim()) {
       toast.error("提供了 CA 证书但未提供 CA 私钥");
       return;
     }
 
-    // Validate existing CA cert and key if provided
+    if (certMode === "ca-chain" && existingCaKey.trim() && !existingCaCert.trim()) {
+      toast.error("提供了 CA 私钥但未提供 CA 证书");
+      return;
+    }
+
+    // Validate existing CA cert and key pairing if both provided
     if (certMode === "ca-chain" && existingCaCert.trim() && existingCaKey.trim()) {
+      if (!existingCaCert.trim().includes("-----BEGIN CERTIFICATE-----")) {
+        toast.error("Root CA 证书 (PEM) 格式无效：缺少 BEGIN CERTIFICATE 标记");
+        return;
+      }
+      if (!existingCaKey.trim().includes("-----BEGIN") || !existingCaKey.trim().includes("PRIVATE KEY-----")) {
+        toast.error("Root CA 私钥 (PEM) 格式无效：缺少 PRIVATE KEY 标记");
+        return;
+      }
       const validation = validateCaCertAndKey(existingCaCert.trim(), existingCaKey.trim());
       if (!validation.valid) {
         toast.error(`CA 验证失败：${validation.error}`);
@@ -451,6 +498,7 @@ export default function App() {
         country: country.trim() || "CN",
         state: state.trim() || "Beijing",
         locality: locality.trim() || "Beijing",
+        email: email.trim() || undefined,
         caDays: parseInt(caDays) || 3650,
         certDays: parseInt(certDays) || 365,
         keySize: parseInt(keySize) || 2048,
@@ -458,6 +506,8 @@ export default function App() {
         ipAddresses: parseList(ipInput),
         existingCaCert: existingCaCert.trim() || undefined,
         existingCaKey: existingCaKey.trim() || undefined,
+        caCommonName: caCommonName.trim() || undefined,
+        caOu: caOu.trim() || undefined,
       };
 
       try {
@@ -472,7 +522,7 @@ export default function App() {
         setIsGenerating(false);
       }
     }, 1500);
-  }, [certMode, commonName, organization, country, state, locality, caDays, certDays, keySize, sansInput, ipInput, existingCaCert, existingCaKey]);
+  }, [certMode, commonName, organization, country, state, locality, email, caDays, certDays, keySize, sansInput, ipInput, existingCaCert, existingCaKey, caCommonName, caOu]);
 
   const quickPresets = [
     { label: "localhost", cn: "localhost", domains: "", ips: "127.0.0.1, ::1" },
@@ -659,7 +709,7 @@ export default function App() {
                           <Info className="w-3.5 h-3.5 text-muted-foreground" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          <p className="text-xs">用逗号分隔多个 IPv4 地址</p>
+                          <p className="text-xs">用逗号分隔多个 IPv4 / IPv6 地址</p>
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -767,6 +817,23 @@ export default function App() {
                         </Select>
                       </div>
 
+                      {/* Email - optional */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor="email">邮箱 (可选)</Label>
+                          <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                        </div>
+                        <Input
+                          id="email"
+                          type="email"
+                          placeholder="admin@example.local"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="bg-background/50 font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">将作为 emailAddress 属性写入证书</p>
+                      </div>
+
                       <div className="space-y-2">
                         <Label htmlFor="org">组织名称</Label>
                         <Input
@@ -776,6 +843,39 @@ export default function App() {
                           className="bg-background/50"
                         />
                       </div>
+
+                      {/* CA CN & OU customization - only for ca-chain mode when NOT using existing CA */}
+                      {certMode === "ca-chain" && (
+                        <div className="space-y-3 p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                            <Label className="text-xs font-semibold text-emerald-400">Root CA 自定义信息</Label>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            自定义 Root CA 的 Common Name 和 OU，留空则使用默认值。
+                          </p>
+                          <div className="space-y-2">
+                            <Label htmlFor="ca-cn" className="text-xs">CA Common Name</Label>
+                            <Input
+                              id="ca-cn"
+                              placeholder={`${organization} Root CA`}
+                              value={caCommonName}
+                              onChange={(e) => setCaCommonName(e.target.value)}
+                              className="bg-background/50 font-mono text-xs"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="ca-ou" className="text-xs">CA Organizational Unit (OU)</Label>
+                            <Input
+                              id="ca-ou"
+                              placeholder="Local Development"
+                              value={caOu}
+                              onChange={(e) => setCaOu(e.target.value)}
+                              className="bg-background/50 font-mono text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">

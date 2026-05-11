@@ -178,6 +178,16 @@
   opacity: 0.4;
 }
 
+/* PEM area - full width display */
+.pem-area {
+  min-width: 0;
+}
+.pem-area pre {
+  white-space: pre;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
 /* Glowing border effect */
 .glow-border {
   position: relative;

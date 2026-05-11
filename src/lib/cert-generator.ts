@@ -10,6 +10,7 @@ export interface CertOptions {
   country?: string;
   state?: string;
   locality?: string;
+  email?: string;
   caDays: number;
   certDays: number;
   keySize: number;
@@ -17,6 +18,8 @@ export interface CertOptions {
   ipAddresses: string[];
   existingCaCert?: string;
   existingCaKey?: string;
+  caCommonName?: string;
+  caOu?: string;
 }
 
 export interface GeneratedCert {
@@ -121,6 +124,7 @@ function generateSelfSigned(options: CertOptions): GeneratedCert {
     country = "CN",
     state = "Beijing",
     locality = "Beijing",
+    email,
     certDays = 365,
     keySize = 2048,
     sans = [],
@@ -141,6 +145,7 @@ function generateSelfSigned(options: CertOptions): GeneratedCert {
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
+    ...(email ? [{ name: "emailAddress", value: email }] : []),
   ];
 
   cert.setSubject(attrs);
@@ -193,15 +198,18 @@ function generateSelfSigned(options: CertOptions): GeneratedCert {
 function generateCaChain(options: CertOptions): GeneratedCert {
   const {
     commonName,
-    organization = "Local Development CA",
+    organization = "Local Development",
     country = "CN",
     state = "Beijing",
     locality = "Beijing",
+    email,
     caDays = 3650,
     certDays = 365,
     keySize = 2048,
     sans = [],
     ipAddresses = [],
+    caCommonName,
+    caOu,
   } = options;
 
   const caKeys = forge.pki.rsa.generateKeyPair(keySize);
@@ -212,13 +220,16 @@ function generateCaChain(options: CertOptions): GeneratedCert {
   caCert.validity.notAfter = new Date();
   caCert.validity.notAfter.setDate(caCert.validity.notBefore.getDate() + caDays);
 
+  const caCnValue = caCommonName || `${organization} Root CA`;
+  const caOuValue = caOu || "Local Development";
+
   const caAttrs = [
-    { name: "commonName", value: `${organization} Root CA` },
+    { name: "commonName", value: caCnValue },
     { name: "countryName", value: country },
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
-    { name: "organizationalUnitName", value: "Local Development" },
+    { name: "organizationalUnitName", value: caOuValue },
   ];
 
   caCert.setSubject(caAttrs);
@@ -244,6 +255,7 @@ function generateCaChain(options: CertOptions): GeneratedCert {
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
+    ...(email ? [{ name: "emailAddress", value: email }] : []),
   ];
 
   serverCert.setSubject(serverAttrs);
@@ -275,7 +287,7 @@ function generateCaChain(options: CertOptions): GeneratedCert {
     serverPrivateKey: serverKeyPem,
     csr: csrPem,
     caInfo: {
-      commonName: `${organization} Root CA`,
+      commonName: caCnValue,
       organization,
       validFrom: caCert.validity.notBefore.toISOString(),
       validTo: caCert.validity.notAfter.toISOString(),
@@ -304,6 +316,7 @@ function signWithExistingCa(options: CertOptions): GeneratedCert {
     country = "CN",
     state = "Beijing",
     locality = "Beijing",
+    email,
     certDays = 365,
     keySize = 2048,
     sans = [],
@@ -333,6 +346,7 @@ function signWithExistingCa(options: CertOptions): GeneratedCert {
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
+    ...(email ? [{ name: "emailAddress", value: email }] : []),
   ];
 
   serverCert.setSubject(serverAttrs);
