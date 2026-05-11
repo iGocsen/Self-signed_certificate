@@ -180,29 +180,29 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             <Layers className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-semibold">信任链</span>
           </div>
-          <div className="flex items-center justify-center gap-3 text-sm flex-wrap">
-            <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2">
+          <div className="flex items-center gap-2 text-sm overflow-x-auto pb-1">
+            <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2 flex-shrink-0">
               <Shield className="w-5 h-5 text-emerald-400 mb-1" />
-              <span className="font-semibold text-emerald-400">Root CA</span>
-              <span className="text-xs text-muted-foreground">自签名</span>
+              <span className="font-semibold text-emerald-400 whitespace-nowrap">Root CA</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">自签名</span>
             </div>
-            <div className="flex flex-col items-center text-muted-foreground">
+            <div className="flex flex-col items-center text-muted-foreground flex-shrink-0">
               <ArrowDown className="w-5 h-5" />
-              <span className="text-xs">签发</span>
+              <span className="text-xs whitespace-nowrap">签发</span>
             </div>
-            <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-2">
+            <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-2 flex-shrink-0">
               <Server className="w-5 h-5 text-blue-400 mb-1" />
-              <span className="font-semibold text-blue-400">Server Cert</span>
-              <span className="text-xs text-muted-foreground">{cert.serverInfo.commonName}</span>
+              <span className="font-semibold text-blue-400 whitespace-nowrap">Server Cert</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">{cert.serverInfo.commonName}</span>
             </div>
-            <div className="flex flex-col items-center text-muted-foreground">
+            <div className="flex flex-col items-center text-muted-foreground flex-shrink-0">
               <ArrowDown className="w-5 h-5" />
-              <span className="text-xs">安装到</span>
+              <span className="text-xs whitespace-nowrap">安装到</span>
             </div>
-            <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2">
+            <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2 flex-shrink-0">
               <Lock className="w-5 h-5 text-amber-400 mb-1" />
-              <span className="font-semibold text-amber-400">信任存储</span>
-              <span className="text-xs text-muted-foreground">受信任根CA</span>
+              <span className="font-semibold text-amber-400 whitespace-nowrap">信任存储</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">受信任根CA</span>
             </div>
           </div>
         </div>
@@ -368,9 +368,9 @@ function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExisti
             </Button>
           </div>
         </div>
-        {/* PEM content - full width, no horizontal scroll needed for typical PEM */}
+        {/* PEM content - full width, vertical scroll only */}
         <div className="relative">
-          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-auto max-h-64 bg-black/20 whitespace-pre-wrap break-all">
+          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-y-auto max-h-64 bg-black/20 whitespace-pre-wrap break-all">
             {contentMap[activeTab]}
           </pre>
         </div>
@@ -568,8 +568,8 @@ export default function App() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-5 gap-8">
-            <div className="lg:col-span-3 space-y-6">
+          <div className="grid lg:grid-cols-4 gap-8">
+            <div className="lg:col-span-2 space-y-6">
               {/* Cert Mode Selection */}
               <div className="bg-card border border-border/50 rounded-xl p-1 flex gap-1">
                 {[
