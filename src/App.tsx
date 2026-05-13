@@ -8,7 +8,6 @@ import {
   Terminal,
   Globe,
   Network,
-  Clock,
   Info,
   Lock,
   FileText,
@@ -18,7 +17,9 @@ import {
   Server,
   Layers,
   ArrowDown,
+  ArrowRight,
   FileKey,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,9 +40,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { generateCertificate, downloadFile, downloadAllFiles, type GeneratedCert, type CertOptions, type CertMode } from "@/lib/cert-generator";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { generateCertificate, downloadFile, downloadAllFiles, validateCaCertAndKey, type GeneratedCert, type CertOptions, type CertMode } from "@/lib/cert-generator";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast,Toaster } from "sonner";
 
 type TabType = "domain" | "ip" | "multi";
 type PemTabType = "ca-cert" | "ca-key" | "server-cert" | "server-key" | "csr";
@@ -112,52 +121,80 @@ function TerminalOutput({ lines, isActive }: { lines: TerminalLine[]; isActive: 
   );
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+interface TrustGuideItem {
+  icon: React.ElementType;
+  title: string;
+  steps: string[];
+  command: string;
+}
+
+function TrustGuideCard({ item }: { item: TrustGuideItem }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.left = "-9999px";
-        textarea.style.top = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
+      await navigator.clipboard.writeText(item.command);
       setCopied(true);
-      toast.success("已复制到剪贴板");
+      toast.success("已复制命令");
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error("复制失败，请手动选择文本复制");
+      toast.error("复制失败");
     }
   };
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-      onClick={handleCopy}
-    >
-      {copied ? (
-        <Check className="w-3.5 h-3.5 text-emerald-400" />
-      ) : (
-        <Copy className="w-3.5 h-3.5" />
-      )}
-      {label}
-    </Button>
+    <div className="bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+          <item.icon className="w-4 h-4 text-emerald-400" />
+        </div>
+        <h4 className="font-semibold">{item.title}</h4>
+      </div>
+      <ol className="text-sm space-y-1.5 text-muted-foreground">
+        {item.steps.map((step, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className="text-emerald-400 font-mono text-xs mt-0.5">{i + 1}.</span>
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+      <div className="relative mt-3">
+        <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 pr-10 overflow-x-auto whitespace-pre">
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-border/30">
+            <div className="w-3 h-3 rounded-full bg-red-500/80" />
+            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+            <div className="w-3 h-3 rounded-full bg-green-500/80" />
+            <span className="ml-2 text-xs text-muted-foreground">terminal — trustguide</span>
+          </div>
+          {item.command}
+        </pre>
+        <button
+          onClick={handleCopy}
+          className="absolute top-2 right-2 p-1.5 rounded-md bg-black/40 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+          title="复制命令"
+        >
+          {copied ? (
+            <Check className="w-3.5 h-3.5 text-emerald-400" />
+          ) : (
+            <Copy className="w-3.5 h-3.5" />
+          )}
+        </button>
+      </div>
+    </div>
   );
 }
 
-function CertPreview({ cert }: { cert: GeneratedCert }) {
+function CertPreview({ cert, usedExistingCa }: { cert: GeneratedCert; usedExistingCa: boolean }) {
   const [activeTab, setActiveTab] = useState<PemTabType>("server-cert");
+  const [copiedTab, setCopiedTab] = useState<PemTabType | null>(null);
+
+  const isCaChain = cert.mode === "ca-chain" && cert.caCertificate;
+
+  // Determine which tabs to show
+  const tabsToShow: PemTabType[] = ["server-cert", "server-key", "csr"];
+  if (isCaChain && !usedExistingCa) {
+    tabsToShow.unshift("ca-cert", "ca-key");
+  }
 
   const contentMap: Record<PemTabType, string> = {
     "ca-cert": cert.caCertificate || "",
@@ -175,7 +212,37 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
     "csr": "server.csr",
   };
 
-  const isCaChain = cert.mode === "ca-chain" && cert.caCertificate;
+  // Ensure active tab is in the visible tabs
+  useEffect(() => {
+    if (!tabsToShow.includes(activeTab)) {
+      setActiveTab("server-cert");
+    }
+  }, [tabsToShow, activeTab]);
+
+  const handleCopy = async (tab: PemTabType) => {
+    try {
+      const text = contentMap[tab];
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      setCopiedTab(tab);
+      toast.success("已复制到剪贴板");
+      setTimeout(() => setCopiedTab(null), 2000);
+    } catch {
+      toast.error("复制失败，请手动选择文本复制");
+    }
+  };
 
   return (
     <div className="space-y-4 animate-slide-up">
@@ -185,29 +252,29 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
             <Layers className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-semibold">信任链</span>
           </div>
-          <div className="flex items-center justify-center gap-3 text-sm flex-wrap">
-            <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2">
+          <div className="flex flex-wrap items-center justify-center gap-1 text-sm w-full">
+            <div className="flex flex-col items-center bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2 flex-shrink-0">
               <Shield className="w-5 h-5 text-emerald-400 mb-1" />
-              <span className="font-semibold text-emerald-400">Root CA</span>
-              <span className="text-xs text-muted-foreground">自签名</span>
+              <span className="font-semibold text-emerald-400 whitespace-nowrap">Root CA</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">自签名</span>
             </div>
-            <div className="flex flex-col items-center text-muted-foreground">
-              <ArrowDown className="w-5 h-5" />
-              <span className="text-xs">签发</span>
+            <div className="flex flex-col items-center text-muted-foreground flex-shrink-0">
+              <ArrowRight className="w-5 h-5" />
+              <span className="text-xs whitespace-nowrap">签发</span>
             </div>
-            <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-2">
+            <div className="flex flex-col items-center bg-blue-500/10 border border-blue-500/20 rounded-lg px-3 py-2 flex-shrink-0">
               <Server className="w-5 h-5 text-blue-400 mb-1" />
-              <span className="font-semibold text-blue-400">Server Cert</span>
-              <span className="text-xs text-muted-foreground">{cert.serverInfo.commonName}</span>
+              <span className="font-semibold text-blue-400 whitespace-nowrap">Server Cert</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">{cert.serverInfo.commonName}</span>
             </div>
-            <div className="flex flex-col items-center text-muted-foreground">
-              <ArrowDown className="w-5 h-5" />
-              <span className="text-xs">安装到</span>
+            <div className="flex flex-col items-center text-muted-foreground flex-shrink-0">
+              <ArrowRight className="w-5 h-5" />
+              <span className="text-xs whitespace-nowrap">安装到</span>
             </div>
-            <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2">
+            <div className="flex flex-col items-center bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 flex-shrink-0">
               <Lock className="w-5 h-5 text-amber-400 mb-1" />
-              <span className="font-semibold text-amber-400">信任存储</span>
-              <span className="text-xs text-muted-foreground">受信任根CA</span>
+              <span className="font-semibold text-amber-400 whitespace-nowrap">信任存储</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">受信任根CA</span>
             </div>
           </div>
         </div>
@@ -228,7 +295,7 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
         </div>
       )}
 
-      {isCaChain && cert.caInfo && (
+      {isCaChain && cert.caInfo && !usedExistingCa && (
         <div className="bg-card/50 border border-emerald-500/20 rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
             <Shield className="w-4 h-4 text-emerald-400" />
@@ -284,6 +351,14 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
           </div>
         </div>
 
+        {/* SHA-256 Fingerprint - always shown */}
+        <div className="mb-3">
+          <span className="text-muted-foreground text-xs">SHA-256 指纹</span>
+          <p className="font-mono text-xs mt-0.5 break-all text-muted-foreground/70">
+            {cert.serverInfo.fingerprint}
+          </p>
+        </div>
+
         {(cert.serverInfo.sans.length > 0 || cert.serverInfo.ipAddresses.length > 0) && (
           <>
             <div className="flex items-center gap-2 mb-2">
@@ -316,18 +391,17 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
         )}
       </div>
 
-      <div className="border border-border/50 rounded-lg overflow-hidden">
-        <div className="flex items-center bg-secondary/50 border-b border-border/50 overflow-x-auto">
-          {(["ca-cert", "ca-key", "server-cert", "server-key", "csr"] as const).map((tab) => {
-            if (tab === "ca-cert" || tab === "ca-key") {
-              if (!isCaChain) return null;
-            }
-            return (
+      {/* PEM Area - Fixed width, fixed action buttons */}
+      <div className="border border-border/50 rounded-lg overflow-hidden pem-area">
+        {/* Tab bar with fixed action buttons on the right */}
+        <div className="flex items-center justify-between bg-secondary/50 border-b border-border/50">
+          <div className="flex items-center overflow-x-auto flex-1 min-w-0">
+            {tabsToShow.map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap",
+                  "px-3 py-2 text-xs font-mono transition-colors relative whitespace-nowrap flex-shrink-0 cursor-pointer",
                   activeTab === tab
                     ? "text-emerald-400 bg-emerald-400/5"
                     : "text-muted-foreground hover:text-foreground"
@@ -338,14 +412,27 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
                   <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
                 )}
               </button>
-            );
-          })}
-          <div className="ml-auto flex items-center gap-1 pr-2 flex-shrink-0">
-            <CopyButton text={contentMap[activeTab]} label="复制" />
+            ))}
+          </div>
+          {/* Fixed action buttons - always visible, never scroll */}
+          <div className="flex items-center gap-1 pr-2 flex-shrink-0 ml-auto">
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+              onClick={() => handleCopy(activeTab)}
+            >
+              {copiedTab === activeTab ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400" />
+              ) : (
+                <Copy className="w-3.5 h-3.5" />
+              )}
+              复制
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
               onClick={() => downloadFile(contentMap[activeTab], labelMap[activeTab])}
             >
               <Download className="w-3.5 h-3.5" />
@@ -353,8 +440,9 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
             </Button>
           </div>
         </div>
+        {/* PEM content - full width, vertical scroll only */}
         <div className="relative">
-          <pre className="p-4 text-xs font-mono text-muted-foreground overflow-x-auto max-h-64 overflow-y-auto bg-black/20">
+          <pre className="w-full p-4 text-xs font-mono text-muted-foreground overflow-y-auto max-h-64 bg-black/20 whitespace-pre-wrap break-all">
             {contentMap[activeTab]}
           </pre>
         </div>
@@ -362,9 +450,9 @@ function CertPreview({ cert }: { cert: GeneratedCert }) {
 
       <div className="flex gap-3">
         <Button
-          className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-semibold"
+          className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-semibold cursor-pointer"
           onClick={() => {
-            downloadAllFiles(cert);
+            downloadAllFiles(cert, usedExistingCa);
             toast.success("所有文件已开始下载");
           }}
         >
@@ -384,16 +472,22 @@ export default function App() {
   const [country, setCountry] = useState("CN");
   const [state, setState] = useState("Beijing");
   const [locality, setLocality] = useState("Beijing");
-  const [caDays, setCaDays] = useState("3650");
+  const [email, setEmail] = useState("");
+  const [caDays, setCaDays] = useState("3653");
   const [certDays, setCertDays] = useState("365");
   const [keySize, setKeySize] = useState("2048");
   const [sansInput, setSansInput] = useState("");
   const [ipInput, setIpInput] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCert, setGeneratedCert] = useState<GeneratedCert | null>(null);
+  const [usedExistingCa, setUsedExistingCa] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [existingCaCert, setExistingCaCert] = useState("");
   const [existingCaKey, setExistingCaKey] = useState("");
+  const [caCommonName, setCaCommonName] = useState("");
+  const [caOu, setCaOu] = useState("");
+  const [showValidationDialog, setShowValidationDialog] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const terminalRef = useRef<HTMLDivElement>(null);
 
   const parseList = (input: string): string[] =>
@@ -403,18 +497,84 @@ export default function App() {
       .filter(Boolean);
 
   const handleGenerate = useCallback(() => {
+    // Collect all validation errors
+    const errors: string[] = [];
+
+    // Validate CN
     if (!commonName.trim()) {
-      toast.error("请填写通用名称 (Common Name)");
-      return;
+      errors.push("通用名称 (Common Name) 不能为空");
     }
 
-    if (certMode === "ca-chain" && existingCaCert && !existingCaKey) {
-      toast.error("提供了 CA 证书但未提供 CA 私钥");
+    // Validate SAN input format
+    if (sansInput.trim()) {
+      const sans = parseList(sansInput);
+      for (const san of sans) {
+        if (!/^[a-zA-Z0-9_\-.*]+$/.test(san)) {
+          errors.push(`其他域名 (SAN) 格式无效：${san}`);
+          break;
+        }
+      }
+    }
+
+    // Validate IP input format
+    if (ipInput.trim()) {
+      const ips = parseList(ipInput);
+      for (const ip of ips) {
+        const isIPv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip);
+        const isIPv6 = /^[0-9a-fA-F:]+$/.test(ip) && ip.includes(':');
+        if (!isIPv4 && !isIPv6) {
+          errors.push(`IP 地址格式无效：${ip}`);
+          break;
+        }
+      }
+    }
+
+    // Validate CA cert and key pairing
+    if (certMode === "ca-chain") {
+      const hasCaCert = existingCaCert.trim();
+      const hasCaKey = existingCaKey.trim();
+
+      if (hasCaCert && !hasCaKey) {
+        errors.push("提供了 Root CA 证书但未提供 Root CA 私钥，请补充填写");
+      }
+      if (hasCaKey && !hasCaCert) {
+        errors.push("提供了 Root CA 私钥但未提供 Root CA 证书，请补充填写");
+      }
+      if (hasCaCert && hasCaKey) {
+        if (!existingCaCert.trim().includes("-----BEGIN CERTIFICATE-----")) {
+          errors.push("Root CA 证书 (PEM) 格式无效：缺少 BEGIN CERTIFICATE 标记");
+        }
+        if (!existingCaKey.trim().includes("-----BEGIN") || !existingCaKey.trim().includes("PRIVATE KEY-----")) {
+          errors.push("Root CA 私钥 (PEM) 格式无效：缺少 PRIVATE KEY 标记");
+        }
+        if (existingCaCert.trim().includes("-----BEGIN CERTIFICATE-----") &&
+            existingCaKey.trim().includes("-----BEGIN") && existingCaKey.trim().includes("PRIVATE KEY-----")) {
+          const validation = validateCaCertAndKey(existingCaCert.trim(), existingCaKey.trim());
+          if (!validation.valid) {
+            errors.push(`Root CA 证书与私钥不匹配：${validation.error}`);
+          }
+        }
+      }
+    }
+
+    // Validate email format if provided
+    if (email.trim()) {
+      const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+      if (!emailRegex.test(email.trim())) {
+        errors.push(`邮箱格式无效：${email.trim()}`);
+      }
+    }
+
+    // If any errors, show dialog
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setShowValidationDialog(true);
       return;
     }
 
     setIsGenerating(true);
     setGeneratedCert(null);
+    setUsedExistingCa(false);
 
     setTimeout(() => {
       const options: CertOptions = {
@@ -424,18 +584,22 @@ export default function App() {
         country: country.trim() || "CN",
         state: state.trim() || "Beijing",
         locality: locality.trim() || "Beijing",
-        caDays: parseInt(caDays) || 3650,
+        email: email.trim() || undefined,
+        caDays: parseInt(caDays) || 3653,
         certDays: parseInt(certDays) || 365,
         keySize: parseInt(keySize) || 2048,
         sans: parseList(sansInput),
         ipAddresses: parseList(ipInput),
         existingCaCert: existingCaCert.trim() || undefined,
         existingCaKey: existingCaKey.trim() || undefined,
+        caCommonName: caCommonName.trim() || undefined,
+        caOu: caOu.trim() || undefined,
       };
 
       try {
         const cert = generateCertificate(options);
         setGeneratedCert(cert);
+        setUsedExistingCa(!!(existingCaCert.trim() && existingCaKey.trim()));
         toast.success("证书生成成功！");
       } catch (e: any) {
         toast.error(e.message || "证书生成失败，请检查输入");
@@ -444,7 +608,7 @@ export default function App() {
         setIsGenerating(false);
       }
     }, 1500);
-  }, [certMode, commonName, organization, country, state, locality, caDays, certDays, keySize, sansInput, ipInput, existingCaCert, existingCaKey]);
+  }, [certMode, commonName, organization, country, state, locality, email, caDays, certDays, keySize, sansInput, ipInput, existingCaCert, existingCaKey, caCommonName, caOu]);
 
   const quickPresets = [
     { label: "localhost", cn: "localhost", domains: "", ips: "127.0.0.1, ::1" },
@@ -466,7 +630,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-lg font-bold tracking-tight">
-                  <span className="text-emerald-400">Local</span>Cert
+                  <span className="text-emerald-400">Local</span>&nbsp;Cert
                 </h1>
                 <p className="text-xs text-muted-foreground">本地 SSL 证书生成器</p>
               </div>
@@ -490,8 +654,8 @@ export default function App() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-5 gap-8">
-            <div className="lg:col-span-3 space-y-6">
+          <div className="grid lg:grid-cols-12 gap-8">
+            <div className="lg:col-span-7 space-y-6">
               {/* Cert Mode Selection */}
               <div className="bg-card border border-border/50 rounded-xl p-1 flex gap-1">
                 {[
@@ -502,7 +666,7 @@ export default function App() {
                     key={id}
                     onClick={() => setCertMode(id)}
                     className={cn(
-                      "flex-1 flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-lg text-sm transition-all",
+                      "flex-1 flex flex-col items-center justify-center gap-1 py-3 px-4 rounded-lg text-sm transition-all cursor-pointer",
                       certMode === id
                         ? "bg-emerald-500/10 text-emerald-400 shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
@@ -526,7 +690,7 @@ export default function App() {
                     key={id}
                     onClick={() => setActiveTab(id)}
                     className={cn(
-                      "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all",
+                      "flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all cursor-pointer",
                       activeTab === id
                         ? "bg-emerald-500/10 text-emerald-400 shadow-sm"
                         : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
@@ -550,7 +714,7 @@ export default function App() {
                         setSansInput(preset.domains);
                         setIpInput(preset.ips);
                       }}
-                      className="px-3 py-1.5 text-xs rounded-md bg-secondary/50 border border-border/50 text-muted-foreground hover:text-foreground hover:border-emerald-500/30 transition-colors"
+                      className="px-3 py-1.5 text-xs rounded-md bg-secondary/50 border border-border/50 text-muted-foreground hover:text-foreground hover:border-emerald-500/30 transition-colors cursor-pointer"
                     >
                       {preset.label}
                     </button>
@@ -612,7 +776,7 @@ export default function App() {
                     </div>
                     <Textarea
                       id="sans"
-                      placeholder="*.dev.local, app.example.local"
+                      placeholder="*.dev.local,app.example.local"
                       value={sansInput}
                       onChange={(e) => setSansInput(e.target.value)}
                       className="bg-background/50 font-mono min-h-[80px] resize-none"
@@ -631,13 +795,13 @@ export default function App() {
                           <Info className="w-3.5 h-3.5 text-muted-foreground" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          <p className="text-xs">用逗号分隔多个 IPv4 地址</p>
+                          <p className="text-xs">用逗号分隔多个 IPv4 / IPv6 地址</p>
                         </TooltipContent>
                       </Tooltip>
                     </div>
                     <Textarea
                       id="ips"
-                      placeholder="127.0.0.1, 192.168.1.100, 10.0.0.1"
+                      placeholder="127.0.0.1,192.168.1.100,10.0.0.1"
                       value={ipInput}
                       onChange={(e) => setIpInput(e.target.value)}
                       className="bg-background/50 font-mono min-h-[80px] resize-none"
@@ -686,7 +850,7 @@ export default function App() {
                 <div>
                   <button
                     onClick={() => setShowAdvanced(!showAdvanced)}
-                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                   >
                     <ChevronDown
                       className={cn(
@@ -710,7 +874,7 @@ export default function App() {
                             onChange={(e) => setCaDays(e.target.value)}
                             className="bg-background/50 font-mono"
                           />
-                          <p className="text-xs text-muted-foreground">建议 3650 天（10年）</p>
+                          <p className="text-xs text-muted-foreground">建议 3653 天（10年）</p>
                         </div>
                       )}
 
@@ -739,6 +903,23 @@ export default function App() {
                         </Select>
                       </div>
 
+                      {/* Email - optional */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor="email">邮箱 (可选)</Label>
+                          <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                        </div>
+                        <Input
+                          id="email"
+                          type="email"
+                          placeholder="admin@example.local"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="bg-background/50 font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">将作为 emailAddress 属性写入证书</p>
+                      </div>
+
                       <div className="space-y-2">
                         <Label htmlFor="org">组织名称</Label>
                         <Input
@@ -748,6 +929,39 @@ export default function App() {
                           className="bg-background/50"
                         />
                       </div>
+
+                      {/* CA CN & OU customization - only for ca-chain mode when NOT using existing CA */}
+                      {certMode === "ca-chain" && (
+                        <div className="space-y-3 p-3 bg-emerald-500/5 border border-emerald-500/10 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                            <Label className="text-xs font-semibold text-emerald-400">Root CA 自定义信息</Label>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            自定义 Root CA 的 Common Name 和 OU，留空则使用默认值。
+                          </p>
+                          <div className="space-y-2">
+                            <Label htmlFor="ca-cn" className="text-xs">CA Common Name</Label>
+                            <Input
+                              id="ca-cn"
+                              placeholder={`${organization} Root CA`}
+                              value={caCommonName}
+                              onChange={(e) => setCaCommonName(e.target.value)}
+                              className="bg-background/50 font-mono text-xs"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="ca-ou" className="text-xs">CA Organizational Unit (OU)</Label>
+                            <Input
+                              id="ca-ou"
+                              placeholder="Local Development"
+                              value={caOu}
+                              onChange={(e) => setCaOu(e.target.value)}
+                              className="bg-background/50 font-mono text-xs"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-3 gap-4">
                         <div className="space-y-2">
@@ -789,7 +1003,7 @@ export default function App() {
                 <Button
                   onClick={handleGenerate}
                   disabled={isGenerating || !commonName.trim()}
-                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-semibold h-12 text-base"
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-black font-semibold h-12 text-base cursor-pointer"
                 >
                   {isGenerating ? (
                     <>
@@ -812,46 +1026,55 @@ export default function App() {
             </div>
 
             {/* Right Panel - Result */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-5 min-w-0">
               <div className="sticky top-24 space-y-4">
                 {!generatedCert && !isGenerating && (
-                  <div className="bg-card/30 border border-border/30 rounded-xl p-8 text-center">
-                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center">
-                      <Lock className="w-8 h-8 text-emerald-400/50" />
-                    </div>
-                    <h3 className="text-lg font-semibold mb-2">等待生成</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      配置左侧参数后点击"生成证书"
-                    </p>
-
-                    <Separator className="my-6" />
-
-                    <div className="text-left space-y-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-xs text-emerald-400 font-bold">1</span>
+                  <div className="bg-card/30 border border-border/30 rounded-xl p-6">
+                    {/* 等待生成 + 步骤列表：小屏上下，中屏及以上左右 */}
+                    <div className="flex flex-col md:flex-row gap-6">
+                      {/* Left: 等待生成 */}
+                      <div className="flex-1 text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center">
+                          <Lock className="w-8 h-8 text-emerald-400/50" />
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">选择证书模式</p>
-                          <p className="text-xs text-muted-foreground">自签名 / CA 证书链</p>
-                        </div>
+                        <h3 className="text-lg font-semibold mb-2">等待生成</h3>
+                        <p className="text-sm text-muted-foreground">
+                          配置左侧参数后点击"生成证书"
+                        </p>
                       </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-xs text-emerald-400 font-bold">2</span>
+
+                      {/* Divider: 小屏水平，中屏及以上垂直 */}
+                      <Separator orientation="vertical" className="hidden md:block mx-2" />
+                      <Separator className="md:hidden my-4" />
+
+                      {/* Right: 3 steps */}
+                      <div className="flex-1 space-y-3 text-left">
+                        <div className="flex items-start gap-3">
+                          <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs text-emerald-400 font-bold">1</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">选择证书模式</p>
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">自签名 / CA 证书链</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">填写域名或 IP</p>
-                          <p className="text-xs text-muted-foreground">CN 会自动加入 SAN</p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs text-emerald-400 font-bold">2</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">填写域名或 IP</p>
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">CN 会自动加入 SAN</p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-xs text-emerald-400 font-bold">3</span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">安装证书到信任存储</p>
-                          <p className="text-xs text-muted-foreground">将证书添加到受信任根CA</p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs text-emerald-400 font-bold">3</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">安装证书到信任存储</p>
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">将证书添加到受信任根CA</p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -876,7 +1099,7 @@ export default function App() {
                       <Check className="w-5 h-5 text-emerald-400" />
                       <h3 className="text-lg font-semibold">证书已生成</h3>
                     </div>
-                    <CertPreview cert={generatedCert} />
+                    <CertPreview cert={generatedCert} usedExistingCa={usedExistingCa} />
                   </>
                 )}
               </div>
@@ -891,7 +1114,7 @@ export default function App() {
             <p className="text-muted-foreground text-center mb-8 max-w-xl mx-auto">
               将证书安装到系统的受信任根证书存储区后，浏览器会自动信任。
             </p>
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {[
                 {
                   icon: Shield,
@@ -919,10 +1142,7 @@ certutil -addstore Root server.crt`,
                     "关闭并输入密码确认",
                   ],
                   command: `# 或使用命令行
-sudo security add-trusted-cert \\
-  -d -r trustRoot \\
-  -k /Library/Keychains/System.keychain \\
-  server.crt`,
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain server.crt`,
                 },
                 {
                   icon: Terminal,
@@ -936,30 +1156,74 @@ sudo security add-trusted-cert \\
 sudo update-ca-certificates`,
                 },
               ].map((item) => (
-                <div
-                  key={item.title}
-                  className="bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                      <item.icon className="w-4 h-4 text-emerald-400" />
-                    </div>
-                    <h4 className="font-semibold">{item.title}</h4>
-                  </div>
-                  <ol className="text-sm space-y-1.5 text-muted-foreground">
-                    {item.steps.map((step, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="text-emerald-400 font-mono text-xs mt-0.5">{i + 1}.</span>
-                        <span>{step}</span>
-                      </li>
-                    ))}
-                  </ol>
-                  <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 overflow-x-auto mt-3">
-                    {item.command}
-                  </pre>
-                </div>
+                <TrustGuideCard key={item.title} item={item} />
               ))}
             </div>
+
+            {/* PFX Tutorial - Separate Full Width Row */}
+            <div className="mt-6">
+              {[
+                {
+                  icon: Terminal,
+                  title: "生成 PFX 证书",
+                  steps: [
+                    "PFX/PKCS#12 格式将证书和私钥打包为一个文件",
+                    "Windows IIS、Azure、某些 Java 应用需要此格式",
+                    "使用 OpenSSL 将 .crt 和 .key 合并为 .pfx",
+                    "设置导出密码保护私钥",
+                    "将 .pfx 导入到目标系统的证书存储",
+                  ],
+                  command: `# 使用 OpenSSL 生成 PFX
+openssl pkcs12 -export \\
+-out server.pfx -inkey server.key -in server.crt -passout pass:your_password
+
+# 或交互式（推荐）
+openssl pkcs12 -export \\
+-out server.pfx -inkey server.key -in server.crt`,
+                },
+              ].map((item) => (
+                <TrustGuideCard key={item.title} item={item} />
+              ))}
+            </div>
+            {/* <div className="mt-6 bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                  <FileKey className="w-4 h-4 text-emerald-400" />
+                </div>
+                <h4 className="font-semibold">生成 PFX 证书</h4>
+              </div>
+              <ol className="text-sm space-y-1.5 text-muted-foreground">
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">1.</span>
+                  <span>PFX/PKCS#12 格式将证书和私钥打包为一个文件</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">2.</span>
+                  <span>Windows IIS、Azure、某些 Java 应用需要此格式</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">3.</span>
+                  <span>使用 OpenSSL 将 .crt 和 .key 合并为 .pfx</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">4.</span>
+                  <span>设置导出密码保护私钥</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-emerald-400 font-mono text-xs mt-0.5">5.</span>
+                  <span>将 .pfx 导入到目标系统的证书存储</span>
+                </li>
+              </ol>
+              <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 overflow-x-auto mt-3 whitespace-pre">
+{`# 使用 OpenSSL 生成 PFX
+openssl pkcs12 -export \\
+  -out server.pfx -inkey server.key -in server.crt -passout pass:your_password
+
+# 或交互式（推荐）
+openssl pkcs12 -export \\
+  -out server.pfx -inkey server.key -in server.crt`}
+              </pre>
+            </div> */}
           </section>
 
           {/* Server Usage Guide */}
@@ -1035,12 +1299,44 @@ https.createServer({
           <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4 text-emerald-400" />
-              <span>LocalCert — 浏览器端本地 SSL 证书生成器</span>
+              <span>Local Cert — 浏览器端本地 SSL 证书生成器</span>
             </div>
             <span>数据完全本地处理，零网络传输</span>
           </div>
         </footer>
       </div>
+
+      {/* Validation Error Dialog */}
+      <Dialog open={showValidationDialog} onOpenChange={setShowValidationDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-400">
+              <AlertTriangle className="w-5 h-5" />
+              输入校验失败
+            </DialogTitle>
+            <DialogDescription className="text-sm">
+              请修正以下 {validationErrors.length} 个错误后重新生成：
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-red-500/5 border border-red-500/20 rounded-lg p-4 space-y-2 max-h-64 overflow-y-auto">
+            {validationErrors.map((err, i) => (
+              <div key={i} className="flex items-start gap-2 text-sm">
+                <span className="text-red-400 mt-0.5 flex-shrink-0">•</span>
+                <span className="text-foreground">{err}</span>
+              </div>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              className="bg-emerald-500 hover:bg-emerald-600 text-black font-semibold"
+              onClick={() => setShowValidationDialog(false)}
+            >
+              我知道了
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Toaster position="bottom-center" />
     </TooltipProvider>
   );
 }

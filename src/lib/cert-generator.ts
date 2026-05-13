@@ -1,4 +1,5 @@
-import forge from "node-forge";
+// node-forge is loaded via CDN in index.html as window.forge
+declare const forge: typeof import("node-forge");
 
 export type CertMode = "self-signed" | "ca-chain";
 
@@ -9,6 +10,7 @@ export interface CertOptions {
   country?: string;
   state?: string;
   locality?: string;
+  email?: string;
   caDays: number;
   certDays: number;
   keySize: number;
@@ -16,6 +18,8 @@ export interface CertOptions {
   ipAddresses: string[];
   existingCaCert?: string;
   existingCaKey?: string;
+  caCommonName?: string;
+  caOu?: string;
 }
 
 export interface GeneratedCert {
@@ -120,6 +124,7 @@ function generateSelfSigned(options: CertOptions): GeneratedCert {
     country = "CN",
     state = "Beijing",
     locality = "Beijing",
+    email,
     certDays = 365,
     keySize = 2048,
     sans = [],
@@ -140,6 +145,7 @@ function generateSelfSigned(options: CertOptions): GeneratedCert {
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
+    ...(email ? [{ name: "emailAddress", value: email }] : []),
   ];
 
   cert.setSubject(attrs);
@@ -192,15 +198,18 @@ function generateSelfSigned(options: CertOptions): GeneratedCert {
 function generateCaChain(options: CertOptions): GeneratedCert {
   const {
     commonName,
-    organization = "Local Development CA",
+    organization = "Local Development",
     country = "CN",
     state = "Beijing",
     locality = "Beijing",
-    caDays = 3650,
+    email,
+    caDays = 3653,
     certDays = 365,
     keySize = 2048,
     sans = [],
     ipAddresses = [],
+    caCommonName,
+    caOu,
   } = options;
 
   const caKeys = forge.pki.rsa.generateKeyPair(keySize);
@@ -211,13 +220,16 @@ function generateCaChain(options: CertOptions): GeneratedCert {
   caCert.validity.notAfter = new Date();
   caCert.validity.notAfter.setDate(caCert.validity.notBefore.getDate() + caDays);
 
+  const caCnValue = caCommonName || `${organization} Root CA`;
+  const caOuValue = caOu || "Local Development";
+
   const caAttrs = [
-    { name: "commonName", value: `${organization} Root CA` },
+    { name: "commonName", value: caCnValue },
     { name: "countryName", value: country },
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
-    { name: "organizationalUnitName", value: "Local Development" },
+    { name: "organizationalUnitName", value: caOuValue },
   ];
 
   caCert.setSubject(caAttrs);
@@ -243,6 +255,7 @@ function generateCaChain(options: CertOptions): GeneratedCert {
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
+    ...(email ? [{ name: "emailAddress", value: email }] : []),
   ];
 
   serverCert.setSubject(serverAttrs);
@@ -274,7 +287,7 @@ function generateCaChain(options: CertOptions): GeneratedCert {
     serverPrivateKey: serverKeyPem,
     csr: csrPem,
     caInfo: {
-      commonName: `${organization} Root CA`,
+      commonName: caCnValue,
       organization,
       validFrom: caCert.validity.notBefore.toISOString(),
       validTo: caCert.validity.notAfter.toISOString(),
@@ -303,6 +316,7 @@ function signWithExistingCa(options: CertOptions): GeneratedCert {
     country = "CN",
     state = "Beijing",
     locality = "Beijing",
+    email,
     certDays = 365,
     keySize = 2048,
     sans = [],
@@ -332,6 +346,7 @@ function signWithExistingCa(options: CertOptions): GeneratedCert {
     { name: "stateOrProvinceName", value: state },
     { name: "localityName", value: locality },
     { name: "organizationName", value: organization },
+    ...(email ? [{ name: "emailAddress", value: email }] : []),
   ];
 
   serverCert.setSubject(serverAttrs);
@@ -405,9 +420,9 @@ export function downloadFile(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadAllFiles(cert: GeneratedCert) {
+export function downloadAllFiles(cert: GeneratedCert, usedExistingCa?: boolean) {
   const files: { content: string; name: string }[] = [];
-  if (cert.mode === "ca-chain" && cert.caCertificate && cert.caPrivateKey) {
+  if (cert.mode === "ca-chain" && cert.caCertificate && cert.caPrivateKey && !usedExistingCa) {
     files.push({ content: cert.caCertificate, name: "root-ca.crt" });
     files.push({ content: cert.caPrivateKey, name: "root-ca.key" });
   }
@@ -417,4 +432,23 @@ export function downloadAllFiles(cert: GeneratedCert) {
   files.forEach((file, index) => {
     setTimeout(() => downloadFile(file.content, file.name), index * 300);
   });
+}
+
+export function validateCaCertAndKey(caCertPem: string, caKeyPem: string): { valid: boolean; error?: string } {
+  try {
+    const caCert = forge.pki.certificateFromPem(caCertPem);
+    const caKey = forge.pki.privateKeyFromPem(caKeyPem);
+
+    const keyPubKey = forge.pki.setRsaPublicKey(caKey.n, caKey.e);
+    const certPubKey = caCert.publicKey as forge.pki.rsa.PublicKey;
+
+    if (certPubKey.n.toString() !== keyPubKey.n.toString() ||
+        certPubKey.e.toString() !== keyPubKey.e.toString()) {
+      return { valid: false, error: "CA 证书与私钥不匹配" };
+    }
+
+    return { valid: true };
+  } catch (e: any) {
+    return { valid: false, error: e.message || "CA 证书或私钥格式无效" };
+  }
 }

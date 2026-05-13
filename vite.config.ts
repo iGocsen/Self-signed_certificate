@@ -6,7 +6,7 @@ import vesaDesignMode from "./.vesa/vite-design-mode-plugin.js";
 import path from "path";
 import fs from "fs";
 
-const hasEsaConfig = fs.existsSync(path.resolve(__dirname, "esa.jsonc"));
+const hasEsaConfig = fs.existsSync(path.resolve(process.cwd(), "esa.jsonc"));
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -30,10 +30,15 @@ export default defineConfig(({ mode }) => ({
   plugins: [vesaErrorReporter(), vesaDesignMode(), tailwindcss(), react()].filter(Boolean),
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(process.cwd(), "./src"),
     },
   },
-  optimizeDeps: {
-    include: ["node-forge"],
+  build: {
+    rollupOptions: {
+      onwarn(warning, warn) {
+        if (warning.code === "CIRCULAR_DEPENDENCY") return;
+        warn(warning);
+      },
+    },
   },
 }));
