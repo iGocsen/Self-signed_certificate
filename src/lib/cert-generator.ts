@@ -203,7 +203,7 @@ function generateCaChain(options: CertOptions): GeneratedCert {
     state = "Beijing",
     locality = "Beijing",
     email,
-    caDays = 3650,
+    caDays = 3653,
     certDays = 365,
     keySize = 2048,
     sans = [],

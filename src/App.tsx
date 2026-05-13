@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/dialog";
 import { generateCertificate, downloadFile, downloadAllFiles, validateCaCertAndKey, type GeneratedCert, type CertOptions, type CertMode } from "@/lib/cert-generator";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast,Toaster } from "sonner";
 
 type TabType = "domain" | "ip" | "multi";
 type PemTabType = "ca-cert" | "ca-key" | "server-cert" | "server-key" | "csr";
@@ -160,6 +160,12 @@ function TrustGuideCard({ item }: { item: TrustGuideItem }) {
       </ol>
       <div className="relative mt-3">
         <pre className="text-xs font-mono text-muted-foreground bg-black/30 rounded-lg p-3 pr-10 overflow-x-auto whitespace-pre">
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-border/30">
+            <div className="w-3 h-3 rounded-full bg-red-500/80" />
+            <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+            <div className="w-3 h-3 rounded-full bg-green-500/80" />
+            <span className="ml-2 text-xs text-muted-foreground">terminal — trustguide</span>
+          </div>
           {item.command}
         </pre>
         <button
@@ -467,7 +473,7 @@ export default function App() {
   const [state, setState] = useState("Beijing");
   const [locality, setLocality] = useState("Beijing");
   const [email, setEmail] = useState("");
-  const [caDays, setCaDays] = useState("3650");
+  const [caDays, setCaDays] = useState("3653");
   const [certDays, setCertDays] = useState("365");
   const [keySize, setKeySize] = useState("2048");
   const [sansInput, setSansInput] = useState("");
@@ -579,7 +585,7 @@ export default function App() {
         state: state.trim() || "Beijing",
         locality: locality.trim() || "Beijing",
         email: email.trim() || undefined,
-        caDays: parseInt(caDays) || 3650,
+        caDays: parseInt(caDays) || 3653,
         certDays: parseInt(certDays) || 365,
         keySize: parseInt(keySize) || 2048,
         sans: parseList(sansInput),
@@ -624,7 +630,7 @@ export default function App() {
               </div>
               <div>
                 <h1 className="text-lg font-bold tracking-tight">
-                  <span className="text-emerald-400">Local</span>Cert
+                  <span className="text-emerald-400">Local</span>&nbsp;Cert
                 </h1>
                 <p className="text-xs text-muted-foreground">本地 SSL 证书生成器</p>
               </div>
@@ -868,7 +874,7 @@ export default function App() {
                             onChange={(e) => setCaDays(e.target.value)}
                             className="bg-background/50 font-mono"
                           />
-                          <p className="text-xs text-muted-foreground">建议 3650 天（10年）</p>
+                          <p className="text-xs text-muted-foreground">建议 3653 天（10年）</p>
                         </div>
                       )}
 
@@ -1023,43 +1029,52 @@ export default function App() {
             <div className="lg:col-span-5 min-w-0">
               <div className="sticky top-24 space-y-4">
                 {!generatedCert && !isGenerating && (
-                  <div className="bg-card/30 border border-border/30 rounded-xl p-8 text-center">
-                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center">
-                      <Lock className="w-8 h-8 text-emerald-400/50" />
-                    </div>
-                    <h3 className="text-lg font-semibold mb-2">等待生成</h3>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      配置左侧参数后点击"生成证书"
-                    </p>
-
-                    <Separator className="my-6" />
-
-                    <div className="text-left space-y-3">
-                      <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-xs text-emerald-400 font-bold">1</span>
+                  <div className="bg-card/30 border border-border/30 rounded-xl p-6">
+                    {/* 等待生成 + 步骤列表：小屏上下，中屏及以上左右 */}
+                    <div className="flex flex-col md:flex-row gap-6">
+                      {/* Left: 等待生成 */}
+                      <div className="flex-1 text-center">
+                        <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center">
+                          <Lock className="w-8 h-8 text-emerald-400/50" />
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">选择证书模式</p>
-                          <p className="text-xs text-muted-foreground">自签名 / CA 证书链</p>
-                        </div>
+                        <h3 className="text-lg font-semibold mb-2">等待生成</h3>
+                        <p className="text-sm text-muted-foreground">
+                          配置左侧参数后点击"生成证书"
+                        </p>
                       </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-xs text-emerald-400 font-bold">2</span>
+
+                      {/* Divider: 小屏水平，中屏及以上垂直 */}
+                      <Separator orientation="vertical" className="hidden md:block mx-2" />
+                      <Separator className="md:hidden my-4" />
+
+                      {/* Right: 3 steps */}
+                      <div className="flex-1 space-y-3 text-left">
+                        <div className="flex items-start gap-3">
+                          <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs text-emerald-400 font-bold">1</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">选择证书模式</p>
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">自签名 / CA 证书链</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium">填写域名或 IP</p>
-                          <p className="text-xs text-muted-foreground">CN 会自动加入 SAN</p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs text-emerald-400 font-bold">2</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">填写域名或 IP</p>
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">CN 会自动加入 SAN</p>
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-xs text-emerald-400 font-bold">3</span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">安装证书到信任存储</p>
-                          <p className="text-xs text-muted-foreground">将证书添加到受信任根CA</p>
+                        <div className="flex items-start gap-3">
+                          <div className="w-6 h-6 rounded bg-emerald-500/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <span className="text-xs text-emerald-400 font-bold">3</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">安装证书到信任存储</p>
+                            <p className="text-xs text-muted-foreground whitespace-nowrap">将证书添加到受信任根CA</p>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1146,7 +1161,31 @@ sudo update-ca-certificates`,
             </div>
 
             {/* PFX Tutorial - Separate Full Width Row */}
-            <div className="mt-6 bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border">
+            <div className="mt-6">
+              {[
+                {
+                  icon: Terminal,
+                  title: "生成 PFX 证书",
+                  steps: [
+                    "PFX/PKCS#12 格式将证书和私钥打包为一个文件",
+                    "Windows IIS、Azure、某些 Java 应用需要此格式",
+                    "使用 OpenSSL 将 .crt 和 .key 合并为 .pfx",
+                    "设置导出密码保护私钥",
+                    "将 .pfx 导入到目标系统的证书存储",
+                  ],
+                  command: `# 使用 OpenSSL 生成 PFX
+openssl pkcs12 -export \\
+-out server.pfx -inkey server.key -in server.crt -passout pass:your_password
+
+# 或交互式（推荐）
+openssl pkcs12 -export \\
+-out server.pfx -inkey server.key -in server.crt`,
+                },
+              ].map((item) => (
+                <TrustGuideCard key={item.title} item={item} />
+              ))}
+            </div>
+            {/* <div className="mt-6 bg-card border border-border/50 rounded-xl p-5 space-y-3 glow-border">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
                   <FileKey className="w-4 h-4 text-emerald-400" />
@@ -1184,7 +1223,7 @@ openssl pkcs12 -export \\
 openssl pkcs12 -export \\
   -out server.pfx -inkey server.key -in server.crt`}
               </pre>
-            </div>
+            </div> */}
           </section>
 
           {/* Server Usage Guide */}
@@ -1260,7 +1299,7 @@ https.createServer({
           <div className="max-w-6xl mx-auto px-6 flex items-center justify-between text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4 text-emerald-400" />
-              <span>LocalCert — 浏览器端本地 SSL 证书生成器</span>
+              <span>Local Cert — 浏览器端本地 SSL 证书生成器</span>
             </div>
             <span>数据完全本地处理，零网络传输</span>
           </div>
@@ -1297,6 +1336,7 @@ https.createServer({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Toaster position="bottom-center" />
     </TooltipProvider>
   );
 }
