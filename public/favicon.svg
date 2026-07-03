@@ -1,5 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <circle cx="16" cy="16" r="16" fill="#000000"/>
-  <text x="16" y="18.5" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="8" font-weight="700" fill="#ffffff" letter-spacing="-0.5">ESA</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <linearGradient id="lockGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14532d"/>
+      <stop offset="100%" stop-color="#166534"/>
+    </linearGradient>
+  </defs>
+  <!-- Shield shape -->
+  <path d="M16 2L5 6.5V14C5 21.5 10.1 28.5 16 30C21.9 28.5 27 21.5 27 14V6.5L16 2Z" fill="url(#shieldGrad)"/>
+  <!-- Lock body -->
+  <rect x="11.5" y="14" width="9" height="7.5" rx="1.5" fill="url(#lockGrad)"/>
+  <!-- Lock shackle -->
+  <path d="M13.5 14V11.5C13.5 10.1 14.6 9 16 9C17.4 9 18.5 10.1 18.5 11.5V14" fill="none" stroke="#166534" stroke-width="1.8" stroke-linecap="round"/>
+  <!-- Keyhole -->
+  <circle cx="16" cy="17" r="1.2" fill="#22c55e"/>
+  <rect x="15.3" y="17.5" width="1.4" height="2.5" rx="0.5" fill="#22c55e"/>
 </svg>
-
